@@ -17,6 +17,13 @@ ignore = [
     # ttf-parser is unmaintained; transitive via iced's font stack. No safe
     # upgrade is available until iced/cosmic-text/winit move off it upstream.
     { id = "RUSTSEC-2026-0192", reason = "transitive via iced font dependencies, no patched version available upstream" },
+    # quick-xml < 0.41 DoS via untrusted XML (quadratic attribute check /
+    # unbounded namespace allocations). Sole consumer here is wayland-scanner,
+    # a build-time proc-macro parsing the vendored Wayland protocol XML — no
+    # untrusted XML is ever parsed at runtime. wayland-scanner 0.31.10 (latest)
+    # still requires quick-xml ^0.39; drop both ignores when it moves to 0.41.
+    { id = "RUSTSEC-2026-0194", reason = "build-time only: wayland-scanner proc-macro parses vendored protocol XML, never untrusted input; no upstream release requires the patched quick-xml 0.41 yet" },
+    { id = "RUSTSEC-2026-0195", reason = "build-time only: wayland-scanner proc-macro parses vendored protocol XML, never untrusted input; no upstream release requires the patched quick-xml 0.41 yet" },
 ]
 
 # ── Licenses ──────────────────────────────────────────────────────────────────
