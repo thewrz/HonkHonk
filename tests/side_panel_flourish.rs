@@ -144,7 +144,10 @@ fn same_class_feathers_diverge_laterally() {
         .filter(|(_, p)| p.class == FeatherClass::Feather)
         .map(|(i, p)| (i, p.position.x))
         .collect();
-    assert!(starts.len() >= 2, "burst should seed multiple full feathers");
+    assert!(
+        starts.len() >= 2,
+        "burst should seed multiple full feathers"
+    );
 
     tick_for(&mut flourish, now, Duration::from_millis(1200));
 
