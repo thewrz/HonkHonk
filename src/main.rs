@@ -1,5 +1,14 @@
 use honkhonk::state::Renderer;
 
+/// Floors saved dimensions so a degenerate persisted size (or a hand-edited
+/// config) can never launch an invisible, unrecoverable window.
+fn restored_window_size(width: u32, height: u32) -> iced::Size {
+    iced::Size::new(
+        (width as f32).max(honkhonk::app::MIN_WINDOW_DIMENSION),
+        (height as f32).max(honkhonk::app::MIN_WINDOW_DIMENSION),
+    )
+}
+
 fn effective_renderer(env_val: Option<&str>, config_pref: Renderer) -> Renderer {
     match env_val {
         Some("software") | Some("tiny-skia") => Renderer::TinySkia,
@@ -80,7 +89,7 @@ fn main() -> iced::Result {
     // window-manager close routes through Message::Quit (audio shutdown + config
     // save) — see the window-event subscription in app::update.
     let window_settings = iced::window::Settings {
-        size: iced::Size::new(config.window_width as f32, config.window_height as f32),
+        size: restored_window_size(config.window_width, config.window_height),
         exit_on_close_request: false,
         ..iced::window::Settings::default()
     };
@@ -145,6 +154,21 @@ fn main() -> iced::Result {
 mod tests {
     use super::*;
     use honkhonk::state::Renderer;
+
+    #[test]
+    fn restored_window_size_floors_degenerate_dimensions() {
+        // A 0/near-0 size persisted by a degenerate resize (or a hand-edited
+        // config) must not launch an invisible, unrecoverable window.
+        let size = restored_window_size(0, 0);
+        assert!(size.width >= honkhonk::app::MIN_WINDOW_DIMENSION);
+        assert!(size.height >= honkhonk::app::MIN_WINDOW_DIMENSION);
+    }
+
+    #[test]
+    fn restored_window_size_keeps_saved_dimensions() {
+        let size = restored_window_size(1440, 912);
+        assert_eq!((size.width, size.height), (1440.0, 912.0));
+    }
 
     #[test]
     fn effective_renderer_software_env_overrides_wgpu_config() {

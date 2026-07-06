@@ -173,6 +173,12 @@ impl Message {
     }
 }
 
+/// Smallest window dimension treated as a real, usable size. Resize events
+/// below it (some compositors emit 0-size on minimize) are not recorded, and
+/// restored sizes are floored to it so a bad config cannot launch an
+/// invisible window.
+pub const MIN_WINDOW_DIMENSION: f32 = 200.0;
+
 pub struct HonkHonk {
     visible: bool,
     exit: bool,
@@ -962,8 +968,12 @@ impl HonkHonk {
                 self.window_size = (w, h);
                 // Record into config (in-memory only — no disk write per resize
                 // event); persisted on quit and by any other settings save.
-                self.config.window_width = w.round().max(0.0) as u32;
-                self.config.window_height = h.round().max(0.0) as u32;
+                // Degenerate events must not clobber the last real size; NaN
+                // also fails these comparisons and is skipped.
+                if w >= MIN_WINDOW_DIMENSION && h >= MIN_WINDOW_DIMENSION {
+                    self.config.window_width = w.round() as u32;
+                    self.config.window_height = h.round() as u32;
+                }
                 Task::none()
             }
             Message::Frame(now) => {
@@ -1741,6 +1751,18 @@ mod tests {
         // were previously dead).
         let mut app = HonkHonk::new_for_test();
         let _ = app.update(Message::WindowResized(1440.0, 912.0));
+        assert_eq!(app.config.window_width, 1440);
+        assert_eq!(app.config.window_height, 912);
+    }
+
+    #[test]
+    fn window_resize_ignores_degenerate_dimensions() {
+        // Some compositors emit 0-size resize events (e.g. on minimize); those
+        // must not clobber the last real size recorded for restore-on-launch.
+        let mut app = HonkHonk::new_for_test();
+        let _ = app.update(Message::WindowResized(1440.0, 912.0));
+        let _ = app.update(Message::WindowResized(0.0, 912.0));
+        let _ = app.update(Message::WindowResized(1440.0, 0.0));
         assert_eq!(app.config.window_width, 1440);
         assert_eq!(app.config.window_height, 912);
     }
