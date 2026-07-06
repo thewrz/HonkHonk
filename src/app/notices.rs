@@ -74,11 +74,20 @@ impl NoticeQueue {
 
     pub fn push(&mut self, notice: Notice, now: Instant) -> NoticeId {
         // Coalesce an identical notice (same level/title/body): refresh its
-        // expiry in place rather than stacking a duplicate, so a fault that
-        // re-emits the same error cannot flood the queue (#156).
-        if let Some(existing) = self.entries.iter_mut().find(|queued| queued.notice == notice) {
-            existing.expires_at = notice.expires_at(now);
-            return existing.id;
+        // expiry and move it to the back rather than stacking a duplicate, so
+        // a fault that re-emits the same error cannot flood the queue (#156)
+        // and cap eviction (oldest-first) never victimizes the freshest one.
+        if let Some(idx) = self
+            .entries
+            .iter()
+            .position(|queued| queued.notice == notice)
+        {
+            if let Some(mut existing) = self.entries.remove(idx) {
+                existing.expires_at = notice.expires_at(now);
+                let id = existing.id;
+                self.entries.push_back(existing);
+                return id;
+            }
         }
         let id = NoticeId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
@@ -183,7 +192,11 @@ mod tests {
         let later = start + Duration::from_secs(3);
         let again = queue.push(Notice::info("Saved", "Configuration updated"), later);
 
-        assert_eq!(queue.len(), 1, "an identical notice must coalesce, not stack");
+        assert_eq!(
+            queue.len(),
+            1,
+            "an identical notice must coalesce, not stack"
+        );
         assert_eq!(first, again, "a coalesced push returns the existing id");
         // Expiry is refreshed from the second push, not the first.
         assert_eq!(
@@ -191,6 +204,27 @@ mod tests {
             0
         );
         assert_eq!(queue.expire(later + Notice::DEFAULT_TIMEOUT), 1);
+    }
+
+    #[test]
+    fn coalesced_notice_is_treated_as_most_recent_for_eviction() {
+        let start = Instant::now();
+        let mut queue = NoticeQueue::new();
+
+        let refreshed = queue.push(Notice::error("Audio error", "sink lost"), start);
+        for i in 0..NoticeQueue::MAX_NOTICES - 1 {
+            queue.push(Notice::error("Audio error", format!("failure {i}")), start);
+        }
+        // The first notice re-emits: coalescing must move it to the back so it
+        // is the freshest entry, not the eviction victim.
+        queue.push(Notice::error("Audio error", "sink lost"), start);
+        // One more distinct notice overflows the cap and evicts the oldest.
+        queue.push(Notice::error("Audio error", "one too many"), start);
+
+        assert!(
+            queue.contains(refreshed),
+            "a just-refreshed notice must not be the eviction victim"
+        );
     }
 
     #[test]
@@ -208,7 +242,10 @@ mod tests {
             "queue stays bounded regardless of distinct persistent errors"
         );
         assert!(!queue.contains(ids[0]), "oldest beyond the cap is evicted");
-        assert!(!queue.contains(ids[1]), "second-oldest beyond the cap is evicted");
+        assert!(
+            !queue.contains(ids[1]),
+            "second-oldest beyond the cap is evicted"
+        );
         assert!(
             queue.contains(ids[NoticeQueue::MAX_NOTICES + 1]),
             "newest notice is retained"
