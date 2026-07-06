@@ -173,6 +173,12 @@ impl Message {
     }
 }
 
+/// Smallest window dimension treated as a real, usable size. Resize events
+/// below it (some compositors emit 0-size on minimize) are not recorded, and
+/// restored sizes are floored to it so a bad config cannot launch an
+/// invisible window.
+pub const MIN_WINDOW_DIMENSION: f32 = 200.0;
+
 pub struct HonkHonk {
     visible: bool,
     exit: bool,
@@ -215,6 +221,10 @@ pub struct HonkHonk {
     /// overwrites the developer's real XDG config dir (config.json, slots.json,
     /// meta.json).
     persist: bool,
+    /// Set when startup could not load the on-disk config (I/O or parse
+    /// error): the in-memory state is then bare defaults, and a quit-time
+    /// save would overwrite the user's repairable file with them.
+    config_load_failed: bool,
     /// Sound ID currently open in the per-sound editor overlay.
     editor_sound_id: Option<String>,
     /// Draft display name held while the editor is open.
@@ -424,6 +434,7 @@ impl HonkHonk {
             source_notice: None,
             sound_meta: SoundMetaStore::load(),
             persist: true,
+            config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
             editor_draft_volume: 1.0,
@@ -484,6 +495,7 @@ impl HonkHonk {
             source_notice: None,
             sound_meta: SoundMetaStore::default(),
             persist: false,
+            config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
             editor_draft_volume: 1.0,
@@ -507,6 +519,21 @@ impl HonkHonk {
 
     pub fn should_exit(&self) -> bool {
         self.exit
+    }
+
+    /// Marks the on-disk config as having failed to load at startup, which
+    /// disables the quit-time config save for the session: the in-memory
+    /// defaults must not clobber the user's repairable file.
+    pub fn mark_config_load_failed(&mut self) {
+        self.config_load_failed = true;
+    }
+
+    /// The quit save is gated on a live audio engine so unit-test fixtures
+    /// (`audio: None`) never write the user's real config file, and on the
+    /// config having loaded cleanly at startup. The `persist` master switch
+    /// applies on top, inside `persist_config`.
+    fn should_persist_config_on_quit(&self) -> bool {
+        self.audio.is_some() && !self.config_load_failed
     }
 
     pub fn is_visible(&self) -> bool {
@@ -638,6 +665,11 @@ impl HonkHonk {
             Message::Quit => {
                 if let Some(ref audio) = self.audio {
                     audio.shutdown();
+                }
+                // Persist the latest window size (recorded in-memory on
+                // resize) and any other config on a real quit.
+                if self.should_persist_config_on_quit() {
+                    self.persist_config();
                 }
                 self.exit = true;
                 iced::exit()
@@ -924,6 +956,14 @@ impl HonkHonk {
             }
             Message::WindowResized(w, h) => {
                 self.window_size = (w, h);
+                // Record into config (in-memory only — no disk write per resize
+                // event); persisted on quit and by any other settings save.
+                // Degenerate events must not clobber the last real size; NaN
+                // also fails these comparisons and is skipped.
+                if w >= MIN_WINDOW_DIMENSION && h >= MIN_WINDOW_DIMENSION {
+                    self.config.window_width = w.round() as u32;
+                    self.config.window_height = h.round() as u32;
+                }
                 Task::none()
             }
             Message::Frame(now) => {
@@ -1426,6 +1466,10 @@ impl HonkHonk {
             iced::Event::Window(iced::window::Event::Resized(size)) => {
                 Some(Message::WindowResized(size.width, size.height))
             }
+            // Route the window-manager close through the same quit path (audio
+            // shutdown + config save) instead of iced's default auto-close
+            // (which is disabled via window::Settings::exit_on_close_request).
+            iced::Event::Window(iced::window::Event::CloseRequested) => Some(Message::Quit),
             _ => None,
         });
 
@@ -1664,6 +1708,52 @@ mod tests {
         assert!(!app.should_exit());
         let _ = app.update(Message::Quit);
         assert!(app.should_exit());
+    }
+
+    #[test]
+    fn quit_persists_config_only_when_it_loaded_cleanly() {
+        // A config that failed to load falls back to in-memory defaults;
+        // saving those on quit would destroy the user's repairable file, so
+        // the quit save must be skipped for the whole session.
+        let mut app = HonkHonk::new_for_test();
+        let (handle, _evt_tx) = crate::audio::test_handle();
+        app.audio = Some(handle);
+        assert!(app.should_persist_config_on_quit());
+
+        app.mark_config_load_failed();
+        assert!(!app.should_persist_config_on_quit());
+    }
+
+    #[test]
+    fn quit_never_persists_config_without_audio_engine() {
+        let app = HonkHonk::new_for_test();
+        assert!(
+            !app.should_persist_config_on_quit(),
+            "test fixtures (audio: None) must never write the real config"
+        );
+    }
+
+    #[test]
+    fn window_resize_records_dimensions_in_config() {
+        // The live window size must flow into config so it can be persisted on
+        // quit and restored on the next launch (the window_width/height fields
+        // were previously dead).
+        let mut app = HonkHonk::new_for_test();
+        let _ = app.update(Message::WindowResized(1440.0, 912.0));
+        assert_eq!(app.config.window_width, 1440);
+        assert_eq!(app.config.window_height, 912);
+    }
+
+    #[test]
+    fn window_resize_ignores_degenerate_dimensions() {
+        // Some compositors emit 0-size resize events (e.g. on minimize); those
+        // must not clobber the last real size recorded for restore-on-launch.
+        let mut app = HonkHonk::new_for_test();
+        let _ = app.update(Message::WindowResized(1440.0, 912.0));
+        let _ = app.update(Message::WindowResized(0.0, 912.0));
+        let _ = app.update(Message::WindowResized(1440.0, 0.0));
+        assert_eq!(app.config.window_width, 1440);
+        assert_eq!(app.config.window_height, 912);
     }
 
     #[test]
