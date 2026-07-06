@@ -175,6 +175,9 @@ mod tests {
         // zero into an inf-derived usize::MAX column count: a 185px width fits
         // far fewer than the 8 preferred tiles, so it must report fewer.
         let cols = responsive_columns(185.0, 8, -MIN_TILE_CELL_W);
-        assert!(cols < 8, "stride-canceling spacing inflated columns to {cols}");
+        assert!(
+            cols < 8,
+            "stride-canceling spacing inflated columns to {cols}"
+        );
     }
 }
