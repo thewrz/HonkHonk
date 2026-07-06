@@ -294,4 +294,8 @@ impl HonkHonk {
 }
 
 #[cfg(test)]
+mod cache_tests;
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
 mod tests;
