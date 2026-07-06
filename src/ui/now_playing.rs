@@ -98,6 +98,15 @@ impl NowPlaying {
         self.envelopes.get(id).map(Arc::clone)
     }
 
+    /// Drops a cached envelope, except for the active sound: playback continues
+    /// from the engine's own `Arc` after its PCM is evicted, so removing the
+    /// active envelope would blank the visible waveform mid-play (#152).
+    pub(crate) fn remove_envelope(&mut self, id: &str) {
+        if self.active_id.as_deref() != Some(id) {
+            self.envelopes.remove(id);
+        }
+    }
+
     /// Reconciles the cache with the current playback state. Returns `true` when
     /// the cached geometry was invalidated (content changed), `false` when the
     /// existing cache is reused. Call once per update/view glue — the only place

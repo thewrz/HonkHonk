@@ -24,8 +24,10 @@ deterministic for tests.
 
 - Do not introduce small/medium/large feather variants.
 - Do not add pixel-art feather sprites.
-- Do not change the settings toggle, duration, fade, gravity, cursor bump, or
-  panel open/close lifecycle.
+- Do not change the settings toggle, duration, fade, gravity, or cursor bump.
+  > Update (as shipped): the close burst was dropped — feathers now emit on
+  > panel *open* only, and closing simply clears them. The open/close *lifecycle*
+  > is otherwise unchanged.
 - Do not add unrelated side-panel abstractions beyond what the emitter model
   needs.
 
@@ -89,8 +91,8 @@ position = lerp(line.start, line.end, t) + outward_offset + side_jitter
 
 The stratification gives even coverage across the whole edge. The deterministic
 jitter prevents the particles from looking mechanically spaced. Velocity keeps
-the current outward direction, scatter, speed variation, close-transition
-rotation bias, gravity, and cursor interaction.
+the current outward direction, scatter, speed variation, gravity, and cursor
+interaction.
 
 ## Data Flow
 
@@ -99,7 +101,7 @@ The existing app flow remains unchanged:
 ```text
 ToggleEffectsPanel / CloseEffectsPanel
   -> app/panels.rs computes panel_geometry(...)
-  -> PanelFlourish::emit(panel, window, transition, now)
+  -> PanelFlourish::emit(panel, window, now)
   -> side_panel/flourish.rs computes BurstEmitter
   -> side_panel/flourish_view.rs renders current particles
 ```
@@ -130,6 +132,7 @@ Run at minimum:
 
 ```bash
 cargo test --test side_panel_flourish
+cargo test --test side_panel_flourish_emitter
 cargo test app::panels::tests
 ```
 

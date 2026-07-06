@@ -1,7 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use iced::widget::{button, container, row, scrollable, space, text};
 use iced::{Element, Length, Point, Subscription, Task, Theme};
@@ -18,10 +18,14 @@ use crate::ui::side_panel::{PanelAnim, PanelFlourish};
 use crate::ui::sound_grid;
 use crate::ui::theme::{self, Hh};
 use crate::ui::{now_playing, search_bar, slot_manager};
+use notices::{Notice, NoticeId, NoticeQueue};
 
 /// Play-dispatch coordination (`request_play` / `handle_decoded` /
 /// `start_playback`), extracted to keep this file from growing (#151).
 mod macros;
+#[cfg(test)]
+mod notice_tests;
+pub(crate) mod notices;
 /// Panel animation state transitions extracted from the Iced update loop (#144).
 mod panels;
 mod playback;
@@ -55,6 +59,9 @@ pub enum Message {
     TrayEvent(TrayEvent),
     TrayPoll,
     AudioEvent(AudioEvent),
+    RaiseNotice(Notice),
+    DismissNotice(NoticeId),
+    NoticeTick(Instant),
     PlaySound(String),
     StopAll,
     StartRecording,
@@ -173,6 +180,12 @@ impl Message {
     }
 }
 
+/// Smallest window dimension treated as a real, usable size. Resize events
+/// below it (some compositors emit 0-size on minimize) are not recorded, and
+/// restored sizes are floored to it so a bad config cannot launch an
+/// invisible window.
+pub const MIN_WINDOW_DIMENSION: f32 = 200.0;
+
 pub struct HonkHonk {
     visible: bool,
     exit: bool,
@@ -204,14 +217,20 @@ pub struct HonkHonk {
     pub monitor_devices: Vec<(String, String)>,
     pub input_devices: Vec<(String, String)>,
     shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService,
-    /// One-time notice surfaced on first run when the persistent virtual mic was
-    /// created programmatically (issue #49). `None` until `SourceFirstRun` fires.
-    source_notice: Option<String>,
+    /// User-visible in-window notices raised from app/audio events.
+    notices: NoticeQueue,
     /// Per-sound metadata: favorites, per-sound volume, display names.
     pub(crate) sound_meta: SoundMetaStore,
-    /// When `false`, `sound_meta.save()` is skipped (used in tests to avoid
-    /// writing to the developer's real XDG config dir during `cargo test`).
-    persist_sound_meta: bool,
+    /// Master persistence switch. When `false`, every disk write —
+    /// `config.save()`, `slots.save()`, `sound_meta.save()` — is skipped. Test
+    /// fixtures (`new_for_test`) set this `false` so `cargo test` never
+    /// overwrites the developer's real XDG config dir (config.json, slots.json,
+    /// meta.json).
+    persist: bool,
+    /// Set when startup could not load the on-disk config (I/O or parse
+    /// error): the in-memory state is then bare defaults, and a quit-time
+    /// save would overwrite the user's repairable file with them.
+    config_load_failed: bool,
     /// Sound ID currently open in the per-sound editor overlay.
     editor_sound_id: Option<String>,
     /// Draft display name held while the editor is open.
@@ -234,13 +253,13 @@ pub struct HonkHonk {
     /// Monotonic counter bumped on every play dispatch. Stamped onto the `Play`
     /// command and echoed back on `PlaybackFinished` to tell a genuine end from
     /// the stale `Finished` of a re-pressed voice (#149), and onto each
-    /// off-thread decode so a `Message::Decoded` from a superseded press is
-    /// dropped on arrival (#151). A decode for a play that was *cancelled*
-    /// (StopAll) is caught by `handle_decoded`'s `playing` check instead.
+    /// off-thread decode so the latest same-id cold repeat can claim ownership
+    /// when the shared decode lands (#151/#152).
     play_generation: u64,
     /// Hot-path decoded-PCM cache (#151).
     audio_store: crate::audio::AudioStore,
     pending_play_ids: HashSet<u64>,
+    pending_decodes: HashMap<String, playback::PendingDecode>,
     /// Persisted macro collection (#165).
     macros: crate::state::MacroStore,
     /// Active live macro capture, if recording is enabled (#167).
@@ -418,9 +437,10 @@ impl HonkHonk {
             monitor_devices: Vec::new(),
             input_devices: Vec::new(),
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
-            source_notice: None,
+            notices: NoticeQueue::new(),
             sound_meta: SoundMetaStore::load(),
-            persist_sound_meta: true,
+            persist: true,
+            config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
             editor_draft_volume: 1.0,
@@ -432,6 +452,7 @@ impl HonkHonk {
             play_generation: 0,
             audio_store: crate::audio::AudioStore::new(crate::audio::DEFAULT_PCM_CAP_BYTES),
             pending_play_ids: HashSet::new(),
+            pending_decodes: HashMap::new(),
             macros: crate::state::MacroStore::load(),
             recording: None,
             macro_editor_draft: None,
@@ -478,9 +499,10 @@ impl HonkHonk {
             monitor_devices: Vec::new(),
             input_devices: Vec::new(),
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
-            source_notice: None,
+            notices: NoticeQueue::new(),
             sound_meta: SoundMetaStore::default(),
-            persist_sound_meta: false,
+            persist: false,
+            config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
             editor_draft_volume: 1.0,
@@ -492,6 +514,7 @@ impl HonkHonk {
             play_generation: 0,
             audio_store: crate::audio::AudioStore::new(crate::audio::DEFAULT_PCM_CAP_BYTES),
             pending_play_ids: HashSet::new(),
+            pending_decodes: HashMap::new(),
             macros: crate::state::MacroStore::default(),
             recording: None,
             macro_editor_draft: None,
@@ -504,6 +527,21 @@ impl HonkHonk {
 
     pub fn should_exit(&self) -> bool {
         self.exit
+    }
+
+    /// Marks the on-disk config as having failed to load at startup, which
+    /// disables the quit-time config save for the session: the in-memory
+    /// defaults must not clobber the user's repairable file.
+    pub fn mark_config_load_failed(&mut self) {
+        self.config_load_failed = true;
+    }
+
+    /// The quit save is gated on a live audio engine so unit-test fixtures
+    /// (`audio: None`) never write the user's real config file, and on the
+    /// config having loaded cleanly at startup. The `persist` master switch
+    /// applies on top, inside `persist_config`.
+    fn should_persist_config_on_quit(&self) -> bool {
+        self.audio.is_some() && !self.config_load_failed
     }
 
     pub fn is_visible(&self) -> bool {
@@ -578,11 +616,8 @@ impl HonkHonk {
         self.shortcuts_warning_dismissed
     }
 
-    /// First-run persistent-mic notice text, if one was surfaced this session
-    /// (issue #49). Returns `None` until a `SourceFirstRun` event fires. A UI
-    /// banner can render this; rendering is intentionally out of scope here.
-    pub fn source_notice(&self) -> Option<&str> {
-        self.source_notice.as_deref()
+    pub(crate) fn notices(&self) -> &NoticeQueue {
+        &self.notices
     }
 
     pub fn sound_meta(&self) -> &SoundMetaStore {
@@ -636,6 +671,11 @@ impl HonkHonk {
                 if let Some(ref audio) = self.audio {
                     audio.shutdown();
                 }
+                // Persist the latest window size (recorded in-memory on
+                // resize) and any other config on a real quit.
+                if self.should_persist_config_on_quit() {
+                    self.persist_config();
+                }
                 self.exit = true;
                 iced::exit()
             }
@@ -664,16 +704,14 @@ impl HonkHonk {
                         sound_id,
                         generation,
                     } => {
-                        // Every play path sets `playing` optimistically at
-                        // dispatch, so a Started for a *different* sound can
-                        // only be a stale event from an older press still in
-                        // the queue — don't let it steal the highlight (#111).
-                        // When the UI is idle, only the current generation may
-                        // claim it: a late superseded concurrent voice (older
-                        // generation) finishing its decode after a newer short
-                        // sound already ended would otherwise re-highlight its
-                        // tile, and its stale Finished is ignored, leaving it
-                        // stuck (#149/#164).
+                        // Warm plays and successful cold decodes claim
+                        // `playing` before the engine's Started event. When the
+                        // UI is idle, only the current generation may claim it:
+                        // a late superseded concurrent voice (older generation)
+                        // finishing after a newer short sound already ended
+                        // would otherwise re-highlight its tile and then leave
+                        // it stuck when the stale Finished is ignored
+                        // (#149/#152/#164).
                         let confirms_current = self.playing.as_deref() == Some(sound_id.as_str());
                         let claims_idle =
                             self.playing.is_none() && generation == self.play_generation;
@@ -713,11 +751,14 @@ impl HonkHonk {
                     }
                     AudioEvent::Error(e) => {
                         tracing::error!(error = %e, "audio error");
+                        self.notices
+                            .push(Notice::error("Audio error", e.to_string()), Instant::now());
                     }
                     AudioEvent::SourceFirstRun { confd_written } => {
-                        let notice = source_first_run_notice(confd_written);
-                        tracing::info!(notice = %notice, "source first-run notice");
-                        self.source_notice = Some(notice);
+                        let body = source_first_run_notice(confd_written);
+                        tracing::info!(notice = %body, "source first-run notice");
+                        self.notices
+                            .push(Notice::info("HonkHonk Mic created", body), Instant::now());
                     }
                     AudioEvent::OutputDevicesChanged(devices) => {
                         if let Some(ref target) = self.config.monitor_device.clone() {
@@ -728,10 +769,8 @@ impl HonkHonk {
                                     monitor_device: None,
                                     ..self.config.clone()
                                 };
-                                if let Err(e) = config.save() {
-                                    tracing::warn!(error = %e, "failed to save config");
-                                }
                                 self.config = config;
+                                self.persist_config();
                                 if let Some(ref audio) = self.audio {
                                     audio.send(AudioCommand::SetMonitorDevice(None));
                                 }
@@ -748,10 +787,8 @@ impl HonkHonk {
                                     input_device: None,
                                     ..self.config.clone()
                                 };
-                                if let Err(e) = config.save() {
-                                    tracing::warn!(error = %e, "failed to save config");
-                                }
                                 self.config = config;
+                                self.persist_config();
                                 if let Some(ref audio) = self.audio {
                                     audio.send(AudioCommand::SetInputDevice(None));
                                 }
@@ -763,6 +800,18 @@ impl HonkHonk {
                         // Reserved for Phase 4B: update UI latency indicator.
                     }
                 }
+                Task::none()
+            }
+            Message::RaiseNotice(notice) => {
+                self.notices.push(notice, Instant::now());
+                Task::none()
+            }
+            Message::DismissNotice(id) => {
+                self.notices.dismiss(id);
+                Task::none()
+            }
+            Message::NoticeTick(now) => {
+                self.notices.expire(now);
                 Task::none()
             }
             Message::PlaySound(sound_id) => {
@@ -781,6 +830,7 @@ impl HonkHonk {
                 // for the stopped sound is dropped on arrival rather than
                 // resurrecting it (#151).
                 self.pending_play_ids.clear();
+                self.pending_decodes.clear();
                 self.clear_playback_state();
                 self.cancel_macro();
                 Task::none()
@@ -853,9 +903,7 @@ impl HonkHonk {
                 Task::none()
             }
             Message::VolumeSaveRequested => {
-                if let Err(e) = self.config.save() {
-                    tracing::warn!(error = %e, "config save error");
-                }
+                self.persist_config();
                 Task::none()
             }
             Message::ShortcutsReady => {
@@ -882,9 +930,7 @@ impl HonkHonk {
                             "slot points to missing file; clearing stale slot"
                         );
                         self.slots.clear(idx);
-                        if let Err(e) = self.slots.save() {
-                            tracing::warn!(error = %e, "slots save error");
-                        }
+                        self.persist_slots();
                     }
                 }
                 Task::none()
@@ -905,16 +951,12 @@ impl HonkHonk {
             }
             Message::AssignSlot(idx, path) => {
                 self.slots.set(idx, path);
-                if let Err(e) = self.slots.save() {
-                    tracing::warn!(error = %e, "slots save error");
-                }
+                self.persist_slots();
                 Task::none()
             }
             Message::ClearSlot(idx) => {
                 self.slots.clear(idx);
-                if let Err(e) = self.slots.save() {
-                    tracing::warn!(error = %e, "slots save error");
-                }
+                self.persist_slots();
                 Task::none()
             }
             Message::OpenContextMenu(sound_id) => {
@@ -933,6 +975,14 @@ impl HonkHonk {
             }
             Message::WindowResized(w, h) => {
                 self.window_size = (w, h);
+                // Record into config (in-memory only — no disk write per resize
+                // event); persisted on quit and by any other settings save.
+                // Degenerate events must not clobber the last real size; NaN
+                // also fails these comparisons and is skipped.
+                if w >= MIN_WINDOW_DIMENSION && h >= MIN_WINDOW_DIMENSION {
+                    self.config.window_width = w.round() as u32;
+                    self.config.window_height = h.round() as u32;
+                }
                 Task::none()
             }
             Message::Frame(now) => {
@@ -975,6 +1025,7 @@ impl HonkHonk {
                     .map(|s| (s.id.clone(), s.path.clone()))
                     .collect();
                 self.sounds = new_sounds;
+                self.reconcile_playback_with_library();
                 self.duration_scan_pairs = std::sync::Arc::new(pairs);
                 self.durations_loaded = false;
                 Task::none()
@@ -994,9 +1045,7 @@ impl HonkHonk {
             Message::SoundDirectoryPickResult(Some(path)) => {
                 if !self.config.sound_directories.contains(&path) {
                     self.config.sound_directories.push(path);
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                     self.update(Message::RescanLibrary)
                 } else {
                     Task::none()
@@ -1005,9 +1054,7 @@ impl HonkHonk {
             Message::SoundDirectoryPickResult(None) => Task::none(),
             Message::RemoveSoundDirectory(path) => {
                 self.config.sound_directories.retain(|p| p != &path);
-                if let Err(e) = self.config.save() {
-                    tracing::warn!(error = %e, "config save error");
-                }
+                self.persist_config();
                 self.update(Message::RescanLibrary)
             }
             Message::ThemeChanged(t) => {
@@ -1016,9 +1063,7 @@ impl HonkHonk {
                         theme: t,
                         ..self.config.clone()
                     };
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1028,9 +1073,7 @@ impl HonkHonk {
                         density: d,
                         ..self.config.clone()
                     };
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1041,9 +1084,7 @@ impl HonkHonk {
                         renderer: r,
                         ..self.config.clone()
                     };
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1052,10 +1093,8 @@ impl HonkHonk {
                     mic_passthrough: v,
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetMicPassthrough(v));
                 }
@@ -1066,10 +1105,8 @@ impl HonkHonk {
                     mic_passthrough_level: v.clamp(0.0, 1.0),
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetMicPassthroughLevel(
                         self.config.mic_passthrough_level,
@@ -1083,10 +1120,8 @@ impl HonkHonk {
                         overlap_mode,
                         ..self.config.clone()
                     };
-                    if let Err(e) = config.save() {
-                        tracing::warn!(error = %e, "failed to save config");
-                    }
                     self.config = config;
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1098,10 +1133,8 @@ impl HonkHonk {
                     monitor_device: target.clone(),
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetMonitorDevice(target));
                 }
@@ -1115,10 +1148,8 @@ impl HonkHonk {
                     input_device: target.clone(),
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetInputDevice(target));
                 }
@@ -1160,7 +1191,7 @@ impl HonkHonk {
             }
             Message::ToggleFavorite(sound_id) => {
                 let is_favorite = self.sound_meta.toggle_favorite(&sound_id);
-                if self.persist_sound_meta {
+                if self.persist {
                     if let Err(e) = self.sound_meta.save() {
                         tracing::warn!(error = %e, "sound meta save error");
                     }
@@ -1217,7 +1248,7 @@ impl HonkHonk {
                     display_name,
                 };
                 self.sound_meta.set(sound_id, meta);
-                if self.persist_sound_meta {
+                if self.persist {
                     if let Err(e) = self.sound_meta.save() {
                         tracing::warn!(error = %e, "sound meta save error");
                     }
@@ -1277,6 +1308,25 @@ impl HonkHonk {
         self.playing = None;
         self.progress = 0.0;
         self.now_playing.clear();
+    }
+
+    /// Persists the live config unless persistence is disabled (test fixtures
+    /// set `persist = false` so `cargo test` never writes the real config file).
+    fn persist_config(&self) {
+        if self.persist {
+            if let Err(e) = self.config.save() {
+                tracing::warn!(error = %e, "config save error");
+            }
+        }
+    }
+
+    /// Persists the slot map under the same persistence switch as the config.
+    fn persist_slots(&self) {
+        if self.persist {
+            if let Err(e) = self.slots.save() {
+                tracing::warn!(error = %e, "slots save error");
+            }
+        }
     }
 
     fn view_header(&self, t: theme::Theme) -> Element<'_, Message> {
@@ -1419,8 +1469,7 @@ impl HonkHonk {
     pub fn subscription(&self) -> Subscription<Message> {
         let shortcuts = Subscription::run(shortcuts_stream_sub_none);
 
-        let tray_poll =
-            iced::time::every(std::time::Duration::from_millis(100)).map(|_| Message::TrayPoll);
+        let tray_poll = iced::time::every(Duration::from_millis(100)).map(|_| Message::TrayPoll);
 
         let events = iced::event::listen_with(|event, _, _window_id| match event {
             iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
@@ -1436,6 +1485,10 @@ impl HonkHonk {
             iced::Event::Window(iced::window::Event::Resized(size)) => {
                 Some(Message::WindowResized(size.width, size.height))
             }
+            // Route the window-manager close through the same quit path (audio
+            // shutdown + config save) instead of iced's default auto-close
+            // (which is disabled via window::Settings::exit_on_close_request).
+            iced::Event::Window(iced::window::Event::CloseRequested) => Some(Message::Quit),
             _ => None,
         });
 
@@ -1454,6 +1507,10 @@ impl HonkHonk {
         // out automatically when playback ends. No fps cap (let it fly at refresh).
         if self.frame_subscription_needed() {
             subs.push(iced::window::frames().map(Message::Frame));
+        }
+
+        if self.notices.has_expiring() {
+            subs.push(iced::time::every(Duration::from_millis(250)).map(Message::NoticeTick));
         }
 
         Subscription::batch(subs)
@@ -1633,7 +1690,7 @@ impl HonkHonk {
     }
 
     pub fn view(&self) -> Element<'_, Message> {
-        match self.view_mode {
+        let base = match self.view_mode {
             ViewMode::Main => self.view_main(),
             ViewMode::SlotManager => {
                 let t = self.config.theme;
@@ -1649,7 +1706,19 @@ impl HonkHonk {
                 )
             }
             ViewMode::Settings => crate::ui::settings::view_settings(self, self.config.theme),
+        };
+
+        let mut layers = vec![base];
+        if let Some(notice_layer) =
+            crate::ui::notice::view_notice_layer(self.notices(), self.config.theme)
+        {
+            layers.push(notice_layer);
         }
+
+        iced::widget::Stack::with_children(layers)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
@@ -1674,6 +1743,73 @@ mod tests {
         assert!(!app.should_exit());
         let _ = app.update(Message::Quit);
         assert!(app.should_exit());
+    }
+
+    #[test]
+    fn quit_persists_config_only_when_it_loaded_cleanly() {
+        // A config that failed to load falls back to in-memory defaults;
+        // saving those on quit would destroy the user's repairable file, so
+        // the quit save must be skipped for the whole session.
+        let mut app = HonkHonk::new_for_test();
+        let (handle, _evt_tx) = crate::audio::test_handle();
+        app.audio = Some(handle);
+        assert!(app.should_persist_config_on_quit());
+
+        app.mark_config_load_failed();
+        assert!(!app.should_persist_config_on_quit());
+    }
+
+    #[test]
+    fn quit_never_persists_config_without_audio_engine() {
+        let app = HonkHonk::new_for_test();
+        assert!(
+            !app.should_persist_config_on_quit(),
+            "test fixtures (audio: None) must never write the real config"
+        );
+    }
+
+    #[test]
+    fn window_resize_records_dimensions_in_config() {
+        // The live window size must flow into config so it can be persisted on
+        // quit and restored on the next launch (the window_width/height fields
+        // were previously dead).
+        let mut app = HonkHonk::new_for_test();
+        let _ = app.update(Message::WindowResized(1440.0, 912.0));
+        assert_eq!(app.config.window_width, 1440);
+        assert_eq!(app.config.window_height, 912);
+    }
+
+    #[test]
+    fn window_resize_ignores_degenerate_dimensions() {
+        // Some compositors emit 0-size resize events (e.g. on minimize); those
+        // must not clobber the last real size recorded for restore-on-launch.
+        let mut app = HonkHonk::new_for_test();
+        let _ = app.update(Message::WindowResized(1440.0, 912.0));
+        let _ = app.update(Message::WindowResized(0.0, 912.0));
+        let _ = app.update(Message::WindowResized(1440.0, 0.0));
+        assert_eq!(app.config.window_width, 1440);
+        assert_eq!(app.config.window_height, 912);
+    }
+
+    #[test]
+    fn test_fixtures_disable_persistence() {
+        // Hermeticity guard: cargo test must never write the developer's real
+        // ~/.config/honkhonk/{config,slots,meta}.json. Every disk write is gated
+        // on `persist`, which must be false for test fixtures. If this flips,
+        // settings/slot tests will clobber the user's real config.
+        let app = HonkHonk::new_for_test();
+        assert!(!app.persist, "new_for_test must disable disk persistence");
+    }
+
+    #[test]
+    fn settings_change_applies_in_memory_without_persisting() {
+        // Disabling persistence must not disable the in-memory update — only the
+        // disk write is skipped. (Confirms the persist gate didn't break the
+        // handler's config mutation.)
+        let mut app = HonkHonk::new_for_test();
+        assert_eq!(app.config.overlap_mode, OverlapMode::Concurrent);
+        let _ = app.update(Message::OverlapModeChanged(OverlapMode::Interrupt));
+        assert_eq!(app.config.overlap_mode, OverlapMode::Interrupt);
     }
 
     #[test]
@@ -1749,28 +1885,6 @@ mod tests {
         assert_eq!(app.progress, 0.0);
         assert_eq!(app.now_playing.display_progress(), 0.0);
         assert!(!app.now_playing.has_playhead());
-    }
-
-    #[test]
-    fn source_first_run_written_sets_persistent_notice() {
-        let mut app = HonkHonk::new_for_test();
-        assert!(app.source_notice().is_none());
-        let _ = app.update(Message::AudioEvent(AudioEvent::SourceFirstRun {
-            confd_written: true,
-        }));
-        let notice = app.source_notice().expect("notice set");
-        assert!(notice.contains("persist"));
-        assert!(notice.contains("HonkHonk Mic"));
-    }
-
-    #[test]
-    fn source_first_run_not_written_sets_session_notice() {
-        let mut app = HonkHonk::new_for_test();
-        let _ = app.update(Message::AudioEvent(AudioEvent::SourceFirstRun {
-            confd_written: false,
-        }));
-        let notice = app.source_notice().expect("notice set");
-        assert!(notice.contains("this session"));
     }
 
     #[test]
@@ -1912,31 +2026,6 @@ mod tests {
     }
 
     #[test]
-    fn play_sound_sets_playing_immediately() {
-        let mut app = HonkHonk::new_for_test();
-        let (handle, _evt_tx) = crate::audio::test_handle();
-        app.audio = Some(handle);
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let wav_path = dir.path().join("honk.wav");
-        write_test_wav(&wav_path);
-        app.sounds = vec![SoundEntry {
-            id: "wav1".into(),
-            name: "Honk".into(),
-            path: wav_path,
-            format: crate::state::AudioFormat::Wav,
-            duration_ms: Some(100),
-            category: "Test".into(),
-        }];
-
-        // The tile highlight must track the press itself, not wait for the
-        // engine's PlaybackStarted to round-trip through the event queue
-        // (issue #111).
-        let _ = app.update(Message::PlaySound("wav1".into()));
-        assert_eq!(app.playing(), Some("wav1"));
-    }
-
-    #[test]
     fn drain_audio_events_processes_entire_backlog() {
         let mut app = HonkHonk::new_for_test();
         let (handle, evt_tx) = crate::audio::test_handle();
@@ -1979,29 +2068,6 @@ mod tests {
 
         assert_eq!(app.playing(), Some("c"));
         assert!((app.progress() - 0.5).abs() < f32::EPSILON);
-    }
-
-    #[test]
-    fn shortcut_activation_sets_playing_immediately() {
-        let mut app = HonkHonk::new_for_test();
-        let (handle, _evt_tx) = crate::audio::test_handle();
-        app.audio = Some(handle);
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let wav_path = dir.path().join("honk.wav");
-        write_test_wav(&wav_path);
-        app.sounds = vec![SoundEntry {
-            id: "wav1".into(),
-            name: "Honk".into(),
-            path: wav_path.clone(),
-            format: crate::state::AudioFormat::Wav,
-            duration_ms: Some(100),
-            category: "Test".into(),
-        }];
-        app.slots.set(0, wav_path);
-
-        let _ = app.update(Message::ShortcutActivated(0));
-        assert_eq!(app.playing(), Some("wav1"));
     }
 
     #[test]
@@ -3223,94 +3289,5 @@ mod tests {
             "stale decode must not start a playhead"
         );
         assert_eq!(app.playing(), Some("newer"));
-    }
-
-    #[test]
-    fn current_decoded_starts_playhead_and_caches_pcm() {
-        let mut app = HonkHonk::new_for_test();
-        let (handle, _evt_tx) = crate::audio::test_handle();
-        app.audio = Some(handle);
-        app.play_generation = 2;
-        app.playing = Some("snd".into());
-        app.pending_play_ids.insert(2);
-
-        let pcm = crate::audio::CachedPcm {
-            samples: std::sync::Arc::new(vec![0.25_f32; 64]),
-            sample_rate: 48_000,
-            channels: 2,
-            duration: std::time::Duration::from_secs(3),
-        };
-        let _ = app.update(Message::Decoded {
-            generation: 2,
-            voice_id: 2,
-            id: "snd".into(),
-            result: Ok(pcm),
-            gain: 1.0,
-            effects: crate::audio::effects::EffectSettings::default(),
-            mode: PlayMode::Concurrent,
-        });
-
-        assert!(
-            app.now_playing.has_playhead(),
-            "current decode must start the playhead"
-        );
-        assert!(
-            app.audio_store.get_pcm("snd").is_some(),
-            "decode result must be cached for instant re-fire"
-        );
-    }
-
-    #[test]
-    fn stopall_mid_decode_does_not_resurrect_playback() {
-        // A cold-cache press dispatches an off-thread decode but sends no engine
-        // Play yet. If the user hits StopAll before the decode lands, the stale
-        // `Decoded` must be dropped — not resurrect the stopped sound (#151).
-        let mut app = HonkHonk::new_for_test();
-        let (handle, _evt_tx) = crate::audio::test_handle();
-        app.audio = Some(handle);
-
-        let dir = tempfile::tempdir().expect("tempdir");
-        let wav_path = dir.path().join("honk.wav");
-        write_test_wav(&wav_path);
-        app.sounds = vec![SoundEntry {
-            id: "wav1".into(),
-            name: "Honk".into(),
-            path: wav_path,
-            format: crate::state::AudioFormat::Wav,
-            duration_ms: Some(100),
-            category: "Test".into(),
-        }];
-
-        // Cold press → generation bumped, decode Task in flight (ignored here).
-        let sound = app.sounds[0].clone();
-        let _ = app.request_play(&sound, false);
-        let in_flight_gen = app.play_generation;
-        assert_eq!(app.playing(), Some("wav1"));
-
-        // StopAll tears down playback and must invalidate the in-flight decode.
-        let _ = app.update(Message::StopAll);
-        assert_eq!(app.playing(), None);
-
-        // The decode lands carrying the now-stale generation.
-        let _ = app.update(Message::Decoded {
-            generation: in_flight_gen,
-            voice_id: in_flight_gen,
-            id: "wav1".into(),
-            result: Ok(crate::audio::CachedPcm {
-                samples: std::sync::Arc::new(vec![0.0_f32; 8]),
-                sample_rate: 48_000,
-                channels: 2,
-                duration: std::time::Duration::from_secs(1),
-            }),
-            gain: 1.0,
-            effects: crate::audio::effects::EffectSettings::default(),
-            mode: PlayMode::Concurrent,
-        });
-
-        assert_eq!(app.playing(), None, "StopAll must win — no resurrection");
-        assert!(
-            !app.now_playing.has_playhead(),
-            "no playhead after a stopped, stale decode"
-        );
     }
 }
