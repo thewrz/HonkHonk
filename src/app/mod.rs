@@ -215,9 +215,12 @@ pub struct HonkHonk {
     source_notice: Option<String>,
     /// Per-sound metadata: favorites, per-sound volume, display names.
     pub(crate) sound_meta: SoundMetaStore,
-    /// When `false`, `sound_meta.save()` is skipped (used in tests to avoid
-    /// writing to the developer's real XDG config dir during `cargo test`).
-    persist_sound_meta: bool,
+    /// Master persistence switch. When `false`, every disk write —
+    /// `config.save()`, `slots.save()`, `sound_meta.save()` — is skipped. Test
+    /// fixtures (`new_for_test`) set this `false` so `cargo test` never
+    /// overwrites the developer's real XDG config dir (config.json, slots.json,
+    /// meta.json).
+    persist: bool,
     /// Set when startup could not load the on-disk config (I/O or parse
     /// error): the in-memory state is then bare defaults, and a quit-time
     /// save would overwrite the user's repairable file with them.
@@ -430,7 +433,7 @@ impl HonkHonk {
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
             source_notice: None,
             sound_meta: SoundMetaStore::load(),
-            persist_sound_meta: true,
+            persist: true,
             config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
@@ -491,7 +494,7 @@ impl HonkHonk {
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
             source_notice: None,
             sound_meta: SoundMetaStore::default(),
-            persist_sound_meta: false,
+            persist: false,
             config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
@@ -527,7 +530,8 @@ impl HonkHonk {
 
     /// The quit save is gated on a live audio engine so unit-test fixtures
     /// (`audio: None`) never write the user's real config file, and on the
-    /// config having loaded cleanly at startup.
+    /// config having loaded cleanly at startup. The `persist` master switch
+    /// applies on top, inside `persist_config`.
     fn should_persist_config_on_quit(&self) -> bool {
         self.audio.is_some() && !self.config_load_failed
     }
@@ -665,9 +669,7 @@ impl HonkHonk {
                 // Persist the latest window size (recorded in-memory on
                 // resize) and any other config on a real quit.
                 if self.should_persist_config_on_quit() {
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "failed to save config on quit");
-                    }
+                    self.persist_config();
                 }
                 self.exit = true;
                 iced::exit()
@@ -761,10 +763,8 @@ impl HonkHonk {
                                     monitor_device: None,
                                     ..self.config.clone()
                                 };
-                                if let Err(e) = config.save() {
-                                    tracing::warn!(error = %e, "failed to save config");
-                                }
                                 self.config = config;
+                                self.persist_config();
                                 if let Some(ref audio) = self.audio {
                                     audio.send(AudioCommand::SetMonitorDevice(None));
                                 }
@@ -781,10 +781,8 @@ impl HonkHonk {
                                     input_device: None,
                                     ..self.config.clone()
                                 };
-                                if let Err(e) = config.save() {
-                                    tracing::warn!(error = %e, "failed to save config");
-                                }
                                 self.config = config;
+                                self.persist_config();
                                 if let Some(ref audio) = self.audio {
                                     audio.send(AudioCommand::SetInputDevice(None));
                                 }
@@ -886,9 +884,7 @@ impl HonkHonk {
                 Task::none()
             }
             Message::VolumeSaveRequested => {
-                if let Err(e) = self.config.save() {
-                    tracing::warn!(error = %e, "config save error");
-                }
+                self.persist_config();
                 Task::none()
             }
             Message::ShortcutsReady => {
@@ -915,9 +911,7 @@ impl HonkHonk {
                             "slot points to missing file; clearing stale slot"
                         );
                         self.slots.clear(idx);
-                        if let Err(e) = self.slots.save() {
-                            tracing::warn!(error = %e, "slots save error");
-                        }
+                        self.persist_slots();
                     }
                 }
                 Task::none()
@@ -938,16 +932,12 @@ impl HonkHonk {
             }
             Message::AssignSlot(idx, path) => {
                 self.slots.set(idx, path);
-                if let Err(e) = self.slots.save() {
-                    tracing::warn!(error = %e, "slots save error");
-                }
+                self.persist_slots();
                 Task::none()
             }
             Message::ClearSlot(idx) => {
                 self.slots.clear(idx);
-                if let Err(e) = self.slots.save() {
-                    tracing::warn!(error = %e, "slots save error");
-                }
+                self.persist_slots();
                 Task::none()
             }
             Message::OpenContextMenu(sound_id) => {
@@ -1035,9 +1025,7 @@ impl HonkHonk {
             Message::SoundDirectoryPickResult(Some(path)) => {
                 if !self.config.sound_directories.contains(&path) {
                     self.config.sound_directories.push(path);
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                     self.update(Message::RescanLibrary)
                 } else {
                     Task::none()
@@ -1046,9 +1034,7 @@ impl HonkHonk {
             Message::SoundDirectoryPickResult(None) => Task::none(),
             Message::RemoveSoundDirectory(path) => {
                 self.config.sound_directories.retain(|p| p != &path);
-                if let Err(e) = self.config.save() {
-                    tracing::warn!(error = %e, "config save error");
-                }
+                self.persist_config();
                 self.update(Message::RescanLibrary)
             }
             Message::ThemeChanged(t) => {
@@ -1057,9 +1043,7 @@ impl HonkHonk {
                         theme: t,
                         ..self.config.clone()
                     };
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1069,9 +1053,7 @@ impl HonkHonk {
                         density: d,
                         ..self.config.clone()
                     };
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1082,9 +1064,7 @@ impl HonkHonk {
                         renderer: r,
                         ..self.config.clone()
                     };
-                    if let Err(e) = self.config.save() {
-                        tracing::warn!(error = %e, "config save error");
-                    }
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1093,10 +1073,8 @@ impl HonkHonk {
                     mic_passthrough: v,
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetMicPassthrough(v));
                 }
@@ -1107,10 +1085,8 @@ impl HonkHonk {
                     mic_passthrough_level: v.clamp(0.0, 1.0),
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetMicPassthroughLevel(
                         self.config.mic_passthrough_level,
@@ -1124,10 +1100,8 @@ impl HonkHonk {
                         overlap_mode,
                         ..self.config.clone()
                     };
-                    if let Err(e) = config.save() {
-                        tracing::warn!(error = %e, "failed to save config");
-                    }
                     self.config = config;
+                    self.persist_config();
                 }
                 Task::none()
             }
@@ -1139,10 +1113,8 @@ impl HonkHonk {
                     monitor_device: target.clone(),
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetMonitorDevice(target));
                 }
@@ -1156,10 +1128,8 @@ impl HonkHonk {
                     input_device: target.clone(),
                     ..self.config.clone()
                 };
-                if let Err(e) = config.save() {
-                    tracing::warn!(error = %e, "failed to save config");
-                }
                 self.config = config;
+                self.persist_config();
                 if let Some(ref audio) = self.audio {
                     audio.send(AudioCommand::SetInputDevice(target));
                 }
@@ -1201,7 +1171,7 @@ impl HonkHonk {
             }
             Message::ToggleFavorite(sound_id) => {
                 let is_favorite = self.sound_meta.toggle_favorite(&sound_id);
-                if self.persist_sound_meta {
+                if self.persist {
                     if let Err(e) = self.sound_meta.save() {
                         tracing::warn!(error = %e, "sound meta save error");
                     }
@@ -1258,7 +1228,7 @@ impl HonkHonk {
                     display_name,
                 };
                 self.sound_meta.set(sound_id, meta);
-                if self.persist_sound_meta {
+                if self.persist {
                     if let Err(e) = self.sound_meta.save() {
                         tracing::warn!(error = %e, "sound meta save error");
                     }
@@ -1318,6 +1288,25 @@ impl HonkHonk {
         self.playing = None;
         self.progress = 0.0;
         self.now_playing.clear();
+    }
+
+    /// Persists the live config unless persistence is disabled (test fixtures
+    /// set `persist = false` so `cargo test` never writes the real config file).
+    fn persist_config(&self) {
+        if self.persist {
+            if let Err(e) = self.config.save() {
+                tracing::warn!(error = %e, "config save error");
+            }
+        }
+    }
+
+    /// Persists the slot map under the same persistence switch as the config.
+    fn persist_slots(&self) {
+        if self.persist {
+            if let Err(e) = self.slots.save() {
+                tracing::warn!(error = %e, "slots save error");
+            }
+        }
     }
 
     fn view_header(&self, t: theme::Theme) -> Element<'_, Message> {
@@ -1765,6 +1754,27 @@ mod tests {
         let _ = app.update(Message::WindowResized(1440.0, 0.0));
         assert_eq!(app.config.window_width, 1440);
         assert_eq!(app.config.window_height, 912);
+    }
+
+    #[test]
+    fn test_fixtures_disable_persistence() {
+        // Hermeticity guard: cargo test must never write the developer's real
+        // ~/.config/honkhonk/{config,slots,meta}.json. Every disk write is gated
+        // on `persist`, which must be false for test fixtures. If this flips,
+        // settings/slot tests will clobber the user's real config.
+        let app = HonkHonk::new_for_test();
+        assert!(!app.persist, "new_for_test must disable disk persistence");
+    }
+
+    #[test]
+    fn settings_change_applies_in_memory_without_persisting() {
+        // Disabling persistence must not disable the in-memory update — only the
+        // disk write is skipped. (Confirms the persist gate didn't break the
+        // handler's config mutation.)
+        let mut app = HonkHonk::new_for_test();
+        assert_eq!(app.config.overlap_mode, OverlapMode::Concurrent);
+        let _ = app.update(Message::OverlapModeChanged(OverlapMode::Interrupt));
+        assert_eq!(app.config.overlap_mode, OverlapMode::Interrupt);
     }
 
     #[test]
