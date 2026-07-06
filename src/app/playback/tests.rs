@@ -201,17 +201,19 @@ fn late_concurrent_decode_keeps_newest_in_now_playing() {
     app.sounds = vec![sound("a"), sound("b")];
     // Default overlap mode is Concurrent, so superseded presses stay pending.
 
-    // Two cold presses: each bumps the generation (A=1, B=2) and, in
-    // concurrent mode, both stay pending awaiting their decode.
+    // Two cold presses: each bumps the generation and, in concurrent mode,
+    // both stay pending awaiting their decode.
     let a = app.sounds[0].clone();
     let b = app.sounds[1].clone();
     let _ = app.request_play(&a, false);
+    let a_generation = app.play_generation;
     let _ = app.request_play(&b, false);
+    let b_generation = app.play_generation;
 
     // Decodes land out of order: the newest press (B) finishes first, then
     // the older press (A).
-    let _ = app.handle_decoded("b".into(), Ok(pcm(16)), dispatch(&app, 2));
-    let _ = app.handle_decoded("a".into(), Ok(pcm(16)), dispatch(&app, 1));
+    let _ = app.handle_decoded("b".into(), Ok(pcm(16)), dispatch(&app, b_generation));
+    let _ = app.handle_decoded("a".into(), Ok(pcm(16)), dispatch(&app, a_generation));
 
     // The older decode must still start its audio (cached + accepted, not
     // dropped as stale)...

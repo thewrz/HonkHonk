@@ -66,13 +66,15 @@ fn pcm_eviction_keeps_active_waveform_envelope() {
     // Two cold presses in concurrent mode: B is the newest press and its
     // decode lands first, so B owns the now-playing UI.
     let _ = app.request_play(&a, false);
+    let a_generation = app.play_generation;
     let _ = app.request_play(&b, false);
-    let _ = app.handle_decoded("b".into(), Ok(pcm(4)), dispatch(&app, 2));
+    let b_generation = app.play_generation;
+    let _ = app.handle_decoded("b".into(), Ok(pcm(4)), dispatch(&app, b_generation));
     assert!(app.now_playing.envelope("b").is_some());
 
     // The late older decode for A lands and evicts B's PCM under cache
     // pressure while B is still the active now-playing sound.
-    let _ = app.handle_decoded("a".into(), Ok(pcm(8)), dispatch(&app, 1));
+    let _ = app.handle_decoded("a".into(), Ok(pcm(8)), dispatch(&app, a_generation));
 
     assert!(
         app.audio_store.get_pcm("b").is_none(),
