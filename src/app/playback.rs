@@ -177,7 +177,21 @@ impl HonkHonk {
         id: &str,
         dispatch: PlaybackDispatch,
     ) -> Option<PendingDecode> {
-        let pending = self.pending_decodes.remove(id).unwrap_or(PendingDecode {
+        // Only the task that owns the pending entry may consume it: a decode
+        // cancelled by StopAll/interrupt shares the sound id with a re-press's
+        // fresh entry but not its voice id, and must not swallow that entry —
+        // otherwise a stale error clears the new press's optimistic UI and the
+        // real result is dropped on arrival (#152).
+        let owns_entry = self
+            .pending_decodes
+            .get(id)
+            .is_some_and(|pending| pending.task_voice_id == dispatch.voice_id);
+        let pending = if owns_entry {
+            self.pending_decodes.remove(id)
+        } else {
+            None
+        }
+        .unwrap_or(PendingDecode {
             task_voice_id: dispatch.voice_id,
             dispatch,
         });

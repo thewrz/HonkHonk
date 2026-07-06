@@ -226,6 +226,78 @@ fn pcm_eviction_removes_matching_waveform_envelope() {
 }
 
 #[test]
+fn pcm_eviction_keeps_active_waveform_envelope() {
+    let mut app = app_with_audio();
+    app.audio_store = crate::audio::AudioStore::new(32);
+    app.sounds = vec![sound("a"), sound("b")];
+    let a = app.sounds[0].clone();
+    let b = app.sounds[1].clone();
+
+    // Two cold presses in concurrent mode: B is the newest press and its
+    // decode lands first, so B owns the now-playing UI.
+    let _ = app.request_play(&a, false);
+    let _ = app.request_play(&b, false);
+    let _ = app.handle_decoded("b".into(), Ok(pcm(4)), dispatch(&app, 2));
+    assert!(app.now_playing.envelope("b").is_some());
+
+    // The late older decode for A lands and evicts B's PCM under cache
+    // pressure while B is still the active now-playing sound.
+    let _ = app.handle_decoded("a".into(), Ok(pcm(8)), dispatch(&app, 1));
+
+    assert!(
+        app.audio_store.get_pcm("b").is_none(),
+        "B's PCM is the eviction victim"
+    );
+    assert!(
+        app.now_playing.envelope("b").is_some(),
+        "the active sound's waveform envelope must not be evicted mid-play"
+    );
+}
+
+#[test]
+fn stale_same_id_decode_does_not_consume_new_pending_decode() {
+    let mut app = app_with_audio();
+    let snd = sound("a");
+    app.sounds = vec![snd.clone()];
+
+    // First cold press spawns decode task A, then StopAll cancels it.
+    let _ = app.request_play(&snd, false);
+    let stale_generation = app.play_generation;
+    let _ = app.update(Message::StopAll);
+
+    // A re-press spawns decode task B for the same sound id.
+    let _ = app.request_play(&snd, false);
+    let new_generation = app.play_generation;
+    assert_eq!(app.playing(), Some("a"));
+
+    // Task A's cancelled decode lands first, as an error. It must not consume
+    // task B's pending entry or clear B's optimistic highlight.
+    let _ = app.handle_decoded(
+        "a".into(),
+        Err("stale decode".into()),
+        dispatch(&app, stale_generation),
+    );
+    assert_eq!(
+        app.playing(),
+        Some("a"),
+        "a stale decode error must not clear the newer press's highlight"
+    );
+
+    // Task B's real result then lands and must still be accepted.
+    let _ = app.handle_decoded("a".into(), Ok(pcm(16)), dispatch(&app, new_generation));
+    assert_eq!(app.playing(), Some("a"));
+    assert!(
+        app.now_playing.has_playhead(),
+        "the newer press's decode must still start playback"
+    );
+    assert_eq!(
+        play_count(&app),
+        1,
+        "exactly the newer press's decode fires a Play"
+    );
+}
+
+#[test]
 fn current_decoded_starts_playhead_and_caches_pcm() {
     let mut app = app_with_audio();
     app.play_generation = 2;
