@@ -212,6 +212,10 @@ pub struct HonkHonk {
     /// When `false`, `sound_meta.save()` is skipped (used in tests to avoid
     /// writing to the developer's real XDG config dir during `cargo test`).
     persist_sound_meta: bool,
+    /// Set when startup could not load the on-disk config (I/O or parse
+    /// error): the in-memory state is then bare defaults, and a quit-time
+    /// save would overwrite the user's repairable file with them.
+    config_load_failed: bool,
     /// Sound ID currently open in the per-sound editor overlay.
     editor_sound_id: Option<String>,
     /// Draft display name held while the editor is open.
@@ -421,6 +425,7 @@ impl HonkHonk {
             source_notice: None,
             sound_meta: SoundMetaStore::load(),
             persist_sound_meta: true,
+            config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
             editor_draft_volume: 1.0,
@@ -481,6 +486,7 @@ impl HonkHonk {
             source_notice: None,
             sound_meta: SoundMetaStore::default(),
             persist_sound_meta: false,
+            config_load_failed: false,
             editor_sound_id: None,
             editor_draft_name: String::new(),
             editor_draft_volume: 1.0,
@@ -504,6 +510,20 @@ impl HonkHonk {
 
     pub fn should_exit(&self) -> bool {
         self.exit
+    }
+
+    /// Marks the on-disk config as having failed to load at startup, which
+    /// disables the quit-time config save for the session: the in-memory
+    /// defaults must not clobber the user's repairable file.
+    pub fn mark_config_load_failed(&mut self) {
+        self.config_load_failed = true;
+    }
+
+    /// The quit save is gated on a live audio engine so unit-test fixtures
+    /// (`audio: None`) never write the user's real config file, and on the
+    /// config having loaded cleanly at startup.
+    fn should_persist_config_on_quit(&self) -> bool {
+        self.audio.is_some() && !self.config_load_failed
     }
 
     pub fn is_visible(&self) -> bool {
@@ -635,10 +655,10 @@ impl HonkHonk {
             Message::Quit => {
                 if let Some(ref audio) = self.audio {
                     audio.shutdown();
-                    // Persist the latest window size (recorded in-memory on
-                    // resize) and any other config on a real quit. Gated on a
-                    // live audio engine so unit-test fixtures (audio: None)
-                    // never write the user's real config file.
+                }
+                // Persist the latest window size (recorded in-memory on
+                // resize) and any other config on a real quit.
+                if self.should_persist_config_on_quit() {
                     if let Err(e) = self.config.save() {
                         tracing::warn!(error = %e, "failed to save config on quit");
                     }
@@ -1689,6 +1709,29 @@ mod tests {
         assert!(!app.should_exit());
         let _ = app.update(Message::Quit);
         assert!(app.should_exit());
+    }
+
+    #[test]
+    fn quit_persists_config_only_when_it_loaded_cleanly() {
+        // A config that failed to load falls back to in-memory defaults;
+        // saving those on quit would destroy the user's repairable file, so
+        // the quit save must be skipped for the whole session.
+        let mut app = HonkHonk::new_for_test();
+        let (handle, _evt_tx) = crate::audio::test_handle();
+        app.audio = Some(handle);
+        assert!(app.should_persist_config_on_quit());
+
+        app.mark_config_load_failed();
+        assert!(!app.should_persist_config_on_quit());
+    }
+
+    #[test]
+    fn quit_never_persists_config_without_audio_engine() {
+        let app = HonkHonk::new_for_test();
+        assert!(
+            !app.should_persist_config_on_quit(),
+            "test fixtures (audio: None) must never write the real config"
+        );
     }
 
     #[test]

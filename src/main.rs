@@ -16,11 +16,11 @@ fn effective_renderer(env_val: Option<&str>, config_pref: Renderer) -> Renderer 
 fn main() -> iced::Result {
     honkhonk::logging::init();
 
-    let config = match honkhonk::state::AppConfig::load() {
-        Ok(c) => c,
+    let (config, config_load_failed) = match honkhonk::state::AppConfig::load() {
+        Ok(c) => (c, false),
         Err(e) => {
             tracing::warn!(error = %e, "failed to load config; using defaults");
-            honkhonk::state::AppConfig::default()
+            (honkhonk::state::AppConfig::default(), true)
         }
     };
 
@@ -123,7 +123,13 @@ fn main() -> iced::Result {
                 .expect("slots mutex poisoned")
                 .take()
                 .expect("boot called more than once");
-            honkhonk::app::HonkHonk::new(tray, audio, sounds, config, slots)
+            let mut app = honkhonk::app::HonkHonk::new(tray, audio, sounds, config, slots);
+            if config_load_failed {
+                // A failed load means `config` is bare defaults: block the
+                // quit-time save so it cannot clobber the user's real file.
+                app.mark_config_load_failed();
+            }
+            app
         },
         honkhonk::app::HonkHonk::update,
         honkhonk::app::HonkHonk::view,
