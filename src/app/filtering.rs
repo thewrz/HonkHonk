@@ -54,6 +54,24 @@ impl HonkHonk {
         iced::widget::operation::focus(search_bar::input_id())
     }
 
+    pub(super) fn handle_escape(&mut self, event_was_captured: bool) -> iced::Task<Message> {
+        if self.context_menu.is_some() {
+            self.context_menu = None;
+            self.context_menu_pos = None;
+        } else if self.editor_sound_id.is_some() {
+            self.editor_sound_id = None;
+            self.editor_draft_name.clear();
+            self.editor_draft_volume = 1.0;
+        } else if self.effects_panel.is_visible() {
+            self.close_effects_panel_from_escape(std::time::Instant::now());
+        } else if event_was_captured {
+            self.filter.consume_focus();
+        } else {
+            self.filter.escape();
+        }
+        iced::Task::none()
+    }
+
     pub fn filtered_sounds(&self) -> Vec<&SoundEntry> {
         filter_items(&self.sounds, self.filter.query(), |sound| {
             let display_name = self
@@ -152,6 +170,17 @@ mod tests {
 
         let _ = app.update(Message::SearchChanged("Öh".into()));
         assert_eq!(app.search_query(), "Öh");
+    }
+
+    #[test]
+    fn captured_escape_after_refocus_does_not_clear_existing_query() {
+        let mut app = HonkHonk::new_for_test();
+        let _ = app.update(Message::SearchChanged("honk".into()));
+        let _ = app.update(Message::EscapePressed);
+        assert_eq!(app.search_query(), "honk");
+
+        let _ = app.update(Message::CapturedEscapePressed);
+        assert_eq!(app.search_query(), "honk");
     }
 
     #[test]

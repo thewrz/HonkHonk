@@ -53,10 +53,14 @@ impl FilterState {
 
     pub fn escape(&mut self) {
         if self.had_focus {
-            self.had_focus = false;
+            self.consume_focus();
         } else {
             self.query.clear();
         }
+    }
+
+    pub fn consume_focus(&mut self) {
+        self.had_focus = false;
     }
 }
 

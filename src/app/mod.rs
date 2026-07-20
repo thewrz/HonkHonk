@@ -88,6 +88,7 @@ pub enum Message {
     SearchChanged(String),
     TypeToFilter(String),
     EscapePressed,
+    CapturedEscapePressed,
     VolumeChanged(f32),
     VolumeSaveRequested,
     // Shortcut lifecycle
@@ -839,26 +840,8 @@ impl HonkHonk {
                 self.active_category = cat;
                 Task::none()
             }
-            Message::EscapePressed => {
-                if self.context_menu.is_some() {
-                    // Context menu takes priority — close it, leave search state intact.
-                    self.context_menu = None;
-                    self.context_menu_pos = None;
-                } else if self.editor_sound_id.is_some() {
-                    // Editor overlay takes next priority — discard draft and close.
-                    self.editor_sound_id = None;
-                    self.editor_draft_name = String::new();
-                    self.editor_draft_volume = 1.0;
-                } else if self.effects_panel.is_visible() {
-                    // Drawer absorbs Escape whenever it is on screen — including
-                    // mid-close — so a second Escape never falls through to clear
-                    // the search query. `close` is a no-op if already closing.
-                    self.close_effects_panel_from_escape(Instant::now());
-                } else {
-                    self.filter.escape();
-                }
-                Task::none()
-            }
+            Message::EscapePressed => self.handle_escape(false),
+            Message::CapturedEscapePressed => self.handle_escape(true),
             Message::SearchChanged(query) => {
                 self.filter.replace(query);
                 Task::none()
@@ -1449,7 +1432,11 @@ impl HonkHonk {
                 iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
                     key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
                     ..
-                }) => Some(Message::EscapePressed),
+                }) => Some(if status == iced::event::Status::Captured {
+                    Message::CapturedEscapePressed
+                } else {
+                    Message::EscapePressed
+                }),
                 iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
                     Some(Message::CursorMoved(position))
                 }
