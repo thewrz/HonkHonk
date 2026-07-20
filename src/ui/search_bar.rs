@@ -1,15 +1,27 @@
 use iced::widget::{button, container, row, text, text_input};
 use iced::{Alignment, Border, Element, Length, Padding};
 
-use crate::app::Message;
 use crate::ui::theme::{self, Hh, Theme};
+
+const INPUT_ID: &str = "honkhonk-shared-filter";
+
+pub fn input_id() -> iced::widget::Id {
+    iced::widget::Id::new(INPUT_ID)
+}
 
 #[allow(
     clippy::too_many_lines,
     reason = "stable stack layout avoids Iced text-input focus reset across query states"
 )]
-pub fn view_search_bar(query: &str) -> Element<'_, Message> {
+pub fn view_search_bar<'a, Message>(
+    query: &'a str,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
     let t = Theme::Dark;
+    let clear_message = on_input(String::new());
 
     // Reserve right space for the clear button so typed text doesn't run under it.
     let padding = if query.is_empty() {
@@ -24,7 +36,8 @@ pub fn view_search_bar(query: &str) -> Element<'_, Message> {
     };
 
     let input: Element<'_, Message> = text_input("Find a sound to honk\u{2026}", query)
-        .on_input(Message::SearchChanged)
+        .id(input_id())
+        .on_input(on_input)
         .size(theme::font::BODY)
         .width(Length::Fixed(300.0))
         .padding(padding)
@@ -56,7 +69,7 @@ pub fn view_search_bar(query: &str) -> Element<'_, Message> {
     } else {
         // Clear button — floats over the right edge of the input via stack.
         let clear_btn = button(text("\u{2715}").size(theme::font::BODY).color(t.ink_dim()))
-            .on_press(Message::SearchChanged(String::new()))
+            .on_press(clear_message)
             .padding(Padding {
                 top: 4.0,
                 right: 10.0,

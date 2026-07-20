@@ -14,6 +14,7 @@ use crate::state::{AppConfig, SlotMap, SoundEntry, SoundMeta, SoundMetaStore};
 use crate::tray::{TrayEvent, TrayHandle};
 use crate::ui::effects_panel::{self, EffectsUiState, PresetId};
 use crate::ui::effects_panel_view;
+use crate::ui::list_controls::filter::FilterState;
 use crate::ui::side_panel::{PanelAnim, PanelFlourish};
 use crate::ui::sound_grid;
 use crate::ui::theme::{self, Hh};
@@ -22,6 +23,7 @@ use notices::{Notice, NoticeId, NoticeQueue};
 
 /// Play-dispatch coordination (`request_play` / `handle_decoded` /
 /// `start_playback`), extracted to keep this file from growing (#151).
+mod filtering;
 mod macros;
 #[cfg(test)]
 mod notice_tests;
@@ -84,6 +86,7 @@ pub enum Message {
     },
     SelectCategory(Option<String>),
     SearchChanged(String),
+    TypeToFilter(String),
     EscapePressed,
     VolumeChanged(f32),
     VolumeSaveRequested,
@@ -196,10 +199,7 @@ pub struct HonkHonk {
     playing: Option<String>,
     active_category: Option<String>,
     pub(crate) config: AppConfig,
-    search_query: String,
-    // True after SearchChanged fires; first Escape consumes it as a blur,
-    // second Escape clears the query. Resets when SearchChanged fires again.
-    search_had_focus: bool,
+    filter: FilterState,
     progress: f32,
     slots: SlotMap,
     pub(crate) slot_triggers: [Option<String>; 20],
@@ -418,8 +418,7 @@ impl HonkHonk {
             playing: None,
             active_category: None,
             config,
-            search_query: String::new(),
-            search_had_focus: false,
+            filter: FilterState::default(),
             progress: 0.0,
             slots,
             slot_triggers: std::array::from_fn(|_| None),
@@ -480,8 +479,7 @@ impl HonkHonk {
             playing: None,
             active_category: None,
             config,
-            search_query: String::new(),
-            search_had_focus: false,
+            filter: FilterState::default(),
             progress: 0.0,
             slots: SlotMap::default(),
             slot_triggers: std::array::from_fn(|_| None),
@@ -581,7 +579,7 @@ impl HonkHonk {
     }
 
     pub fn search_query(&self) -> &str {
-        &self.search_query
+        self.filter.query()
     }
 
     pub fn progress(&self) -> f32 {
@@ -626,31 +624,6 @@ impl HonkHonk {
 
     pub fn editor_sound_id(&self) -> Option<&str> {
         self.editor_sound_id.as_deref()
-    }
-
-    pub fn filtered_sounds(&self) -> Vec<&SoundEntry> {
-        let query = self.search_query.to_lowercase();
-        self.sounds
-            .iter()
-            .filter(|s| match self.active_category.as_deref() {
-                Some(cat) if cat == FAVORITES_TAB => self.sound_meta.is_favorite(&s.id),
-                Some(cat) => s.category == cat,
-                None => true,
-            })
-            .filter(|s| {
-                if query.is_empty() {
-                    return true;
-                }
-                // Also match against the display-name override so sounds
-                // renamed by the user remain discoverable by their visible label.
-                let display_name_matches = self
-                    .sound_meta
-                    .get_ref(&s.id)
-                    .and_then(|m| m.display_name.as_deref())
-                    .is_some_and(|name| name.to_lowercase().contains(&query));
-                s.name.to_lowercase().contains(&query) || display_name_matches
-            })
-            .collect()
     }
 
     #[allow(
@@ -881,20 +854,16 @@ impl HonkHonk {
                     // mid-close — so a second Escape never falls through to clear
                     // the search query. `close` is a no-op if already closing.
                     self.close_effects_panel_from_escape(Instant::now());
-                } else if self.search_had_focus {
-                    // First Esc: treat as blur — Iced already handled unfocus.
-                    self.search_had_focus = false;
-                } else if !self.search_query.is_empty() {
-                    // Second Esc (or Esc when unfocused): clear query.
-                    self.search_query = String::new();
+                } else {
+                    self.filter.escape();
                 }
                 Task::none()
             }
             Message::SearchChanged(query) => {
-                self.search_had_focus = true;
-                self.search_query = query;
+                self.filter.replace(query);
                 Task::none()
             }
+            Message::TypeToFilter(text) => self.handle_type_to_filter(&text),
             Message::VolumeChanged(v) => {
                 self.config.volume = v.clamp(0.0, 1.0);
                 if let Some(ref audio) = self.audio {
@@ -1350,7 +1319,7 @@ impl HonkHonk {
                 ..Default::default()
             });
 
-        let search = search_bar::view_search_bar(&self.search_query);
+        let search = search_bar::view_search_bar(self.filter.query(), Message::SearchChanged);
 
         let record_btn = self.view_record_button(t);
 
@@ -1471,25 +1440,31 @@ impl HonkHonk {
 
         let tray_poll = iced::time::every(Duration::from_millis(100)).map(|_| Message::TrayPoll);
 
-        let events = iced::event::listen_with(|event, _, _window_id| match event {
-            iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
-                key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
-                ..
-            }) => Some(Message::EscapePressed),
-            iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
-                Some(Message::CursorMoved(position))
+        let events = iced::event::listen_with(|event, status, _window_id| {
+            if let Some(text) = filtering::type_to_filter_text(&event, status) {
+                return Some(Message::TypeToFilter(text));
             }
-            iced::Event::Window(iced::window::Event::Opened { size, .. }) => {
-                Some(Message::WindowResized(size.width, size.height))
+
+            match event {
+                iced::Event::Keyboard(iced::keyboard::Event::KeyPressed {
+                    key: iced::keyboard::Key::Named(iced::keyboard::key::Named::Escape),
+                    ..
+                }) => Some(Message::EscapePressed),
+                iced::Event::Mouse(iced::mouse::Event::CursorMoved { position }) => {
+                    Some(Message::CursorMoved(position))
+                }
+                iced::Event::Window(iced::window::Event::Opened { size, .. }) => {
+                    Some(Message::WindowResized(size.width, size.height))
+                }
+                iced::Event::Window(iced::window::Event::Resized(size)) => {
+                    Some(Message::WindowResized(size.width, size.height))
+                }
+                // Route the window-manager close through the same quit path (audio
+                // shutdown + config save) instead of iced's default auto-close
+                // (which is disabled via window::Settings::exit_on_close_request).
+                iced::Event::Window(iced::window::Event::CloseRequested) => Some(Message::Quit),
+                _ => None,
             }
-            iced::Event::Window(iced::window::Event::Resized(size)) => {
-                Some(Message::WindowResized(size.width, size.height))
-            }
-            // Route the window-manager close through the same quit path (audio
-            // shutdown + config save) instead of iced's default auto-close
-            // (which is disabled via window::Settings::exit_on_close_request).
-            iced::Event::Window(iced::window::Event::CloseRequested) => Some(Message::Quit),
-            _ => None,
         });
 
         let mut subs = vec![shortcuts, tray_poll, events];
@@ -2891,9 +2866,9 @@ mod tests {
     fn escape_first_press_consumes_search_focus_flag_without_clearing_query() {
         let mut app = HonkHonk::new_for_test();
         let _ = app.update(Message::SearchChanged("honk".into()));
-        assert!(app.search_had_focus);
+        assert!(app.filter.had_focus());
         let _ = app.update(Message::EscapePressed);
-        assert!(!app.search_had_focus);
+        assert!(!app.filter.had_focus());
         assert_eq!(app.search_query(), "honk");
     }
 
@@ -2913,15 +2888,15 @@ mod tests {
         let _ = app.update(Message::OpenContextMenu("test-id".into()));
         let _ = app.update(Message::EscapePressed);
         assert!(app.context_menu().is_none());
-        assert!(app.search_had_focus); // not consumed — menu took priority
+        assert!(app.filter.had_focus()); // not consumed — menu took priority
     }
 
     #[test]
-    fn search_changed_sets_search_had_focus() {
+    fn search_changed_sets_filter_focus_stage() {
         let mut app = HonkHonk::new_for_test();
-        assert!(!app.search_had_focus);
+        assert!(!app.filter.had_focus());
         let _ = app.update(Message::SearchChanged("test".into()));
-        assert!(app.search_had_focus);
+        assert!(app.filter.had_focus());
     }
 
     // Per-sound metadata tests
@@ -2975,8 +2950,8 @@ mod tests {
         assert!(app.editor_sound_id().is_some());
         let _ = app.update(Message::EscapePressed);
         assert!(app.editor_sound_id().is_none());
-        // search_had_focus must NOT be consumed — editor took priority
-        assert!(app.search_had_focus);
+        // The filter focus stage must NOT be consumed — editor took priority.
+        assert!(app.filter.had_focus());
     }
 
     #[test]
@@ -3247,7 +3222,7 @@ mod tests {
         // panel is still on screen. Escape must be absorbed by the drawer, not
         // fall through and wipe the search query.
         let mut app = HonkHonk::new_for_test();
-        app.search_query = "bark".to_owned();
+        app.filter.replace("bark".to_owned());
         let _ = app.update(Message::ToggleEffectsPanel); // opening
         let open = Instant::now() + crate::ui::side_panel::SLIDE_DURATION;
         let _ = app.update(Message::Frame(open)); // settled open
@@ -3255,7 +3230,7 @@ mod tests {
         assert!(!app.effects_panel.is_open());
         assert!(app.effects_panel.is_visible());
         let _ = app.update(Message::EscapePressed);
-        assert_eq!(app.search_query, "bark");
+        assert_eq!(app.search_query(), "bark");
     }
 
     #[test]
