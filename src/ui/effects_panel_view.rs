@@ -85,7 +85,7 @@ fn view_master_row(state: &EffectsUiState, t: Theme) -> Element<'static, Message
         .style(move |_th, _s| chip_style(t, active));
 
     let mix = slider(0.0..=1.0, state.wet_dry, Message::SetWetDryMix)
-        .step(0.01)
+        .step(0.01_f32)
         .width(Length::Fixed(MIX_SLIDER_W));
     let mix_label = text(format!("{}%", (state.wet_dry * 100.0).round() as i32))
         .size(theme::font::LABEL)
