@@ -1,7 +1,9 @@
 /// Whether a view may claim otherwise-unhandled printable keypresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Activation {
+    /// An ignored printable keypress may focus and seed the filter input.
     TypeToFilter,
+    /// Filtering begins only after the user explicitly focuses the input.
     ClickOnly,
 }
 
@@ -13,6 +15,7 @@ pub struct ActivationContext {
 }
 
 impl ActivationContext {
+    /// Combines a view's activation policy with its current overlay state.
     pub const fn new(activation: Activation, blocking_layer_visible: bool) -> Self {
         Self {
             activation,
@@ -20,6 +23,7 @@ impl ActivationContext {
         }
     }
 
+    /// Returns whether an ignored printable keypress may activate filtering.
     pub const fn allows_typing(self) -> bool {
         matches!(self.activation, Activation::TypeToFilter) && !self.blocking_layer_visible
     }
@@ -33,24 +37,29 @@ pub struct FilterState {
 }
 
 impl FilterState {
+    /// Returns the transient filter query.
     pub fn query(&self) -> &str {
         &self.query
     }
 
+    /// Returns whether the next uncaptured Escape should consume focus staging.
     pub const fn had_focus(&self) -> bool {
         self.had_focus
     }
 
+    /// Replaces the query and stages the first Escape as a blur.
     pub fn replace(&mut self, query: String) {
         self.query = query;
         self.had_focus = true;
     }
 
+    /// Appends produced keyboard text and stages the first Escape as a blur.
     pub fn insert(&mut self, text: &str) {
         self.query.push_str(text);
         self.had_focus = true;
     }
 
+    /// Consumes staged focus first, then clears the query on a later Escape.
     pub fn escape(&mut self) {
         if self.had_focus {
             self.consume_focus();
@@ -59,6 +68,7 @@ impl FilterState {
         }
     }
 
+    /// Marks the staged focus transition as consumed without clearing the query.
     pub fn consume_focus(&mut self) {
         self.had_focus = false;
     }

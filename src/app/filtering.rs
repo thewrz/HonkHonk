@@ -62,6 +62,10 @@ impl HonkHonk {
             self.editor_sound_id = None;
             self.editor_draft_name.clear();
             self.editor_draft_volume = 1.0;
+        } else if self.macro_editor_draft.is_some() {
+            // The draft belongs to the macro editor; its own close/discard flow
+            // decides its fate, so global Escape must not alter filter state.
+            return iced::Task::none();
         } else if self.effects_panel.is_visible() {
             self.close_effects_panel_from_escape(std::time::Instant::now());
         } else if event_was_captured {
@@ -72,6 +76,7 @@ impl HonkHonk {
         iced::Task::none()
     }
 
+    /// Returns sounds matching the shared query and active category filters.
     pub fn filtered_sounds(&self) -> Vec<&SoundEntry> {
         filter_items(&self.sounds, self.filter.query(), |sound| {
             let display_name = self
@@ -181,6 +186,23 @@ mod tests {
 
         let _ = app.update(Message::CapturedEscapePressed);
         assert_eq!(app.search_query(), "honk");
+    }
+
+    #[test]
+    fn macro_editor_draft_absorbs_escape_without_changing_filter_state() {
+        let mut app = HonkHonk::new_for_test();
+        let _ = app.update(Message::SearchChanged("honk".into()));
+        app.macro_editor_draft = Some(Macro {
+            id: "draft".into(),
+            name: "Draft".into(),
+            steps: Vec::new(),
+        });
+
+        let _ = app.update(Message::EscapePressed);
+
+        assert_eq!(app.search_query(), "honk");
+        assert!(app.filter.had_focus());
+        assert!(app.macro_editor_draft().is_some());
     }
 
     #[test]

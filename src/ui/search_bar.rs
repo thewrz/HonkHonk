@@ -5,6 +5,7 @@ use crate::ui::theme::{self, Hh, Theme};
 
 const INPUT_ID: &str = "honkhonk-shared-filter";
 
+/// Returns the stable widget identifier used for programmatic filter focus.
 pub fn input_id() -> iced::widget::Id {
     iced::widget::Id::new(INPUT_ID)
 }
@@ -13,6 +14,7 @@ pub fn input_id() -> iced::widget::Id {
     clippy::too_many_lines,
     reason = "stable stack layout avoids Iced text-input focus reset across query states"
 )]
+/// Builds the shared search input using the caller's message mapper.
 pub fn view_search_bar<'a, Message>(
     query: &'a str,
     on_input: impl Fn(String) -> Message + 'a,

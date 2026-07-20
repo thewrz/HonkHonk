@@ -86,8 +86,11 @@ pub enum Message {
     },
     SelectCategory(Option<String>),
     SearchChanged(String),
+    /// Seeds the active filter from an otherwise-unhandled printable keypress.
     TypeToFilter(String),
+    /// Routes an uncaptured Escape through overlay and filter staging.
     EscapePressed,
+    /// Routes a widget-captured Escape without clearing the filter query.
     CapturedEscapePressed,
     VolumeChanged(f32),
     VolumeSaveRequested,
