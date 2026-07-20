@@ -10,7 +10,7 @@ pub fn view_volume(volume: f32) -> Element<'static, Message> {
 
     let vol_slider = slider(0.0..=1.0, volume, Message::VolumeChanged)
         .on_release(Message::VolumeSaveRequested)
-        .step(0.01)
+        .step(0.01_f32)
         .width(140.0);
 
     let label = text(pct)

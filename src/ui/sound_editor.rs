@@ -187,7 +187,7 @@ fn view_volume_row<'a>(draft_volume: f32, sound_id: String, t: Theme) -> Element
     let vol_slider = slider(0.0..=2.0, draft_volume, move |v| {
         Message::SoundEditorVolumeChanged(sound_id.clone(), v)
     })
-    .step(0.01);
+    .step(0.01_f32);
 
     container(
         column![
