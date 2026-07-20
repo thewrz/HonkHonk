@@ -18,6 +18,7 @@ pub(super) fn sound(id: &str) -> SoundEntry {
         path: format!("/tmp/{id}.wav").into(),
         format: crate::state::AudioFormat::Wav,
         duration_ms: Some(100),
+        modified_ms: None,
         category: "Test".into(),
     }
 }

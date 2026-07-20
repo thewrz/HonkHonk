@@ -100,6 +100,7 @@ mod tests {
             path: path.into(),
             format: AudioFormat::Wav,
             duration_ms: Some(100),
+            modified_ms: None,
             category: "Test".into(),
         }
     }
