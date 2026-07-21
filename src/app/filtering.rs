@@ -249,6 +249,7 @@ mod tests {
             format: AudioFormat::Wav,
             duration_ms: None,
             category: "Animals".into(),
+            modified_ms: None,
         }];
         app.sound_meta
             .set_display_name("goose", Some("Angry Bird".into()));

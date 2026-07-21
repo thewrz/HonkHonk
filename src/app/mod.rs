@@ -21,10 +21,10 @@ use crate::ui::theme::{self, Hh};
 use crate::ui::{now_playing, search_bar, slot_manager};
 use notices::{Notice, NoticeId, NoticeQueue};
 
-mod library_scan;
 /// Play-dispatch coordination (`request_play` / `handle_decoded` /
 /// `start_playback`), extracted to keep this file from growing (#151).
 mod filtering;
+mod library_scan;
 mod macros;
 #[cfg(test)]
 mod notice_tests;
