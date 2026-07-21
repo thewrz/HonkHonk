@@ -7,7 +7,7 @@ pub mod sound_meta;
 
 pub use config::{AppConfig, Density, OverlapMode, Renderer};
 pub use error::ConfigError;
-pub use library::{AudioFormat, Library, SoundEntry};
+pub use library::{AudioFormat, Library, LibraryScan, SoundEntry};
 pub use macros::{Macro, MacroStore, Step};
 pub use slots::SlotMap;
 pub use sound_meta::{SoundMeta, SoundMetaStore};

@@ -10,7 +10,7 @@ use crate::audio::effects::EffectSlot;
 use crate::audio::{AudioCommand, AudioEvent, AudioHandle, PlayMode};
 use crate::shortcuts::ShortcutsStatus;
 use crate::state::config::{Density, OverlapMode};
-use crate::state::{AppConfig, SlotMap, SoundEntry, SoundMeta, SoundMetaStore};
+use crate::state::{AppConfig, LibraryScan, SlotMap, SoundEntry, SoundMeta, SoundMetaStore};
 use crate::tray::{TrayEvent, TrayHandle};
 use crate::ui::effects_panel::{self, EffectsUiState, PresetId};
 use crate::ui::effects_panel_view;
@@ -24,6 +24,7 @@ use notices::{Notice, NoticeId, NoticeQueue};
 /// Play-dispatch coordination (`request_play` / `handle_decoded` /
 /// `start_playback`), extracted to keep this file from growing (#151).
 mod filtering;
+mod library_scan;
 mod macros;
 #[cfg(test)]
 mod notice_tests;
@@ -401,11 +402,13 @@ impl HonkHonk {
     pub fn new(
         mut tray: TrayHandle,
         audio: AudioHandle,
-        sounds: Vec<SoundEntry>,
+        scan: LibraryScan,
         config: AppConfig,
         slots: SlotMap,
     ) -> Self {
         let rx = tray.take_rx();
+        let sound_meta = library_scan::load_sound_meta(&scan);
+        let sounds = scan.entries;
         let duration_scan_pairs = std::sync::Arc::new(
             sounds
                 .iter()
@@ -441,7 +444,7 @@ impl HonkHonk {
             input_devices: Vec::new(),
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
             notices: NoticeQueue::new(),
-            sound_meta: SoundMetaStore::load(),
+            sound_meta,
             persist: true,
             config_load_failed: false,
             editor_sound_id: None,
@@ -968,21 +971,14 @@ impl HonkHonk {
                 Task::none()
             }
             Message::RescanLibrary => {
-                let new_sounds = match crate::state::Library::scan(&self.config.sound_directories) {
-                    Ok(sounds) => sounds,
+                let scan = match crate::state::Library::scan(&self.config.sound_directories) {
+                    Ok(scan) => scan,
                     Err(e) => {
                         tracing::warn!(dirs = ?self.config.sound_directories, error = %e, "library rescan failed");
                         return Task::none();
                     }
                 };
-                let pairs: Vec<(String, std::path::PathBuf)> = new_sounds
-                    .iter()
-                    .map(|s| (s.id.clone(), s.path.clone()))
-                    .collect();
-                self.sounds = new_sounds;
-                self.reconcile_playback_with_library();
-                self.duration_scan_pairs = std::sync::Arc::new(pairs);
-                self.durations_loaded = false;
+                self.apply_library_scan(scan);
                 Task::none()
             }
             Message::AddSoundDirectory => Task::perform(
@@ -1890,6 +1886,7 @@ mod tests {
             path: "/a.mp3".into(),
             format: crate::state::AudioFormat::Mp3,
             duration_ms: Some(1000),
+            modified_ms: None,
             category: "Honk".into(),
         }];
 
@@ -2155,6 +2152,7 @@ mod tests {
             path: wav_path,
             format: crate::state::AudioFormat::Wav,
             duration_ms: Some(100),
+            modified_ms: None,
             category: "Test".into(),
         }];
 
@@ -2247,6 +2245,7 @@ mod tests {
                 path: "/a.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: Some(1000),
+                modified_ms: None,
                 category: "Honk".into(),
             },
             SoundEntry {
@@ -2255,6 +2254,7 @@ mod tests {
                 path: "/b.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: Some(1000),
+                modified_ms: None,
                 category: "Memes".into(),
             },
         ];
@@ -2272,6 +2272,7 @@ mod tests {
             path: "/a.mp3".into(),
             format: crate::state::AudioFormat::Mp3,
             duration_ms: Some(1000),
+            modified_ms: None,
             category: "Honk".into(),
         }];
         let _ = app.update(Message::SearchChanged("GOOSE".into()));
@@ -2288,6 +2289,7 @@ mod tests {
                 path: "/a.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: Some(1000),
+                modified_ms: None,
                 category: "Honk".into(),
             },
             SoundEntry {
@@ -2296,6 +2298,7 @@ mod tests {
                 path: "/b.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: Some(1000),
+                modified_ms: None,
                 category: "Memes".into(),
             },
         ];
@@ -2376,6 +2379,7 @@ mod tests {
             path: path.clone(),
             format: crate::state::AudioFormat::Mp3,
             duration_ms: Some(500),
+            modified_ms: None,
             category: "Honk".into(),
         }];
         let _ = app.update(Message::AssignSlot(0, path.clone()));
@@ -2480,6 +2484,7 @@ mod tests {
             path: "/tmp/honk.wav".into(),
             format: crate::state::AudioFormat::Wav,
             duration_ms: None,
+            modified_ms: None,
             category: "Honk".into(),
         }];
         let map = std::collections::HashMap::from([("abc123".to_string(), 1500u64)]);
@@ -2497,6 +2502,7 @@ mod tests {
             path: "/tmp/honk.wav".into(),
             format: crate::state::AudioFormat::Wav,
             duration_ms: None,
+            modified_ms: None,
             category: "Honk".into(),
         }];
         let map = std::collections::HashMap::from([("no-match".to_string(), 999u64)]);
@@ -2531,44 +2537,6 @@ mod tests {
         let _ = app.update(Message::ShowSettings);
         let _ = app.update(Message::ShowMain);
         assert!(matches!(app.view_mode, ViewMode::Main));
-    }
-
-    #[test]
-    fn rescan_library_resets_durations_loaded() {
-        let mut app = HonkHonk::new_for_test();
-        app.durations_loaded = true;
-        let _ = app.update(Message::RescanLibrary);
-        assert!(
-            !app.durations_loaded,
-            "RescanLibrary must reset durations_loaded"
-        );
-    }
-
-    #[test]
-    fn remove_sound_directory_removes_path() {
-        let mut app = HonkHonk::new_for_test();
-        let path = std::path::PathBuf::from("/tmp/hh_test_sounds");
-        app.config.sound_directories.push(path.clone());
-        let _ = app.update(Message::RemoveSoundDirectory(path.clone()));
-        assert!(!app.config.sound_directories.contains(&path));
-    }
-
-    #[test]
-    fn sound_directory_pick_some_appends_to_config() {
-        let mut app = HonkHonk::new_for_test();
-        let path = std::path::PathBuf::from("/tmp/hh_new_sounds");
-        let before = app.config.sound_directories.len();
-        let _ = app.update(Message::SoundDirectoryPickResult(Some(path.clone())));
-        assert_eq!(app.config.sound_directories.len(), before + 1);
-        assert!(app.config.sound_directories.contains(&path));
-    }
-
-    #[test]
-    fn sound_directory_pick_none_is_noop() {
-        let mut app = HonkHonk::new_for_test();
-        let before = app.config.sound_directories.clone();
-        let _ = app.update(Message::SoundDirectoryPickResult(None));
-        assert_eq!(app.config.sound_directories, before);
     }
 
     #[test]
@@ -2910,6 +2878,7 @@ mod tests {
             path: "/a.mp3".into(),
             format: crate::state::AudioFormat::Mp3,
             duration_ms: None,
+            modified_ms: None,
             category: "General".into(),
         }];
         let _ = app.update(Message::OpenSoundEditor("abc".into()));
@@ -3020,6 +2989,7 @@ mod tests {
                 path: "/fav.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: None,
+                modified_ms: None,
                 category: "General".into(),
             },
             SoundEntry {
@@ -3028,6 +2998,7 @@ mod tests {
                 path: "/nonfav.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: None,
+                modified_ms: None,
                 category: "General".into(),
             },
         ];
@@ -3048,6 +3019,7 @@ mod tests {
                 path: "/a.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: None,
+                modified_ms: None,
                 category: "X".into(),
             },
             SoundEntry {
@@ -3056,6 +3028,7 @@ mod tests {
                 path: "/b.mp3".into(),
                 format: crate::state::AudioFormat::Mp3,
                 duration_ms: None,
+                modified_ms: None,
                 category: "Y".into(),
             },
         ];
@@ -3077,6 +3050,7 @@ mod tests {
             path: "/only.mp3".into(),
             format: crate::state::AudioFormat::Mp3,
             duration_ms: None,
+            modified_ms: None,
             category: "General".into(),
         }];
         let _ = app.update(Message::ToggleFavorite("only".into()));
@@ -3102,6 +3076,7 @@ mod tests {
             path: "/id1.wav".into(),
             format: crate::state::AudioFormat::Wav,
             duration_ms: None,
+            modified_ms: None,
             category: "Animals".into(),
         }];
         // Rename the sound via the editor workflow
@@ -3134,6 +3109,7 @@ mod tests {
             path: wav_path,
             format: crate::state::AudioFormat::Wav,
             duration_ms: Some(100),
+            modified_ms: None,
             category: "Test".into(),
         }];
 

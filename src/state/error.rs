@@ -33,6 +33,9 @@ pub enum ConfigError {
     #[error("unable to determine XDG config directory")]
     NoConfigDir,
 
+    #[error("refusing to overwrite unreadable or unsupported sound metadata: {path}")]
+    UnsafeMetadataOverwrite { path: String },
+
     #[error("library scan error: {0}")]
     ScanEntry(String),
 }

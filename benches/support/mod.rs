@@ -59,6 +59,7 @@ pub fn make_sounds(n: usize) -> Vec<SoundEntry> {
                 } else {
                     None
                 },
+                modified_ms: None,
                 category: category.to_owned(),
             }
         })

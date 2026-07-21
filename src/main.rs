@@ -55,11 +55,14 @@ fn main() -> iced::Result {
 
     pipewire::init();
 
-    let sounds = match honkhonk::state::Library::scan(&config.sound_directories) {
-        Ok(s) => s,
+    let scan = match honkhonk::state::Library::scan(&config.sound_directories) {
+        Ok(scan) => scan,
         Err(e) => {
             tracing::warn!(error = %e, "failed to scan sound library");
-            Vec::new()
+            honkhonk::state::LibraryScan {
+                entries: Vec::new(),
+                complete: false,
+            }
         }
     };
 
@@ -96,7 +99,7 @@ fn main() -> iced::Result {
 
     let tray_handle = std::sync::Mutex::new(Some(tray_handle));
     let audio_handle = std::sync::Mutex::new(Some(audio_handle));
-    let sounds = std::sync::Mutex::new(Some(sounds));
+    let scan = std::sync::Mutex::new(Some(scan));
     let config = std::sync::Mutex::new(Some(config));
     let slots = std::sync::Mutex::new(Some(slots));
 
@@ -117,9 +120,9 @@ fn main() -> iced::Result {
                 .expect("audio mutex poisoned")
                 .take()
                 .expect("boot called more than once");
-            let sounds = sounds
+            let scan = scan
                 .lock()
-                .expect("sounds mutex poisoned")
+                .expect("library scan mutex poisoned")
                 .take()
                 .expect("boot called more than once");
             let config = config
@@ -132,7 +135,7 @@ fn main() -> iced::Result {
                 .expect("slots mutex poisoned")
                 .take()
                 .expect("boot called more than once");
-            let mut app = honkhonk::app::HonkHonk::new(tray, audio, sounds, config, slots);
+            let mut app = honkhonk::app::HonkHonk::new(tray, audio, scan, config, slots);
             if config_load_failed {
                 // A failed load means `config` is bare defaults: block the
                 // quit-time save so it cannot clobber the user's real file.

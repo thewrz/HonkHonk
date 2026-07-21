@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use lofty::prelude::AudioFile;
 use lofty::probe::Probe;
@@ -12,6 +12,9 @@ use walkdir::WalkDir;
 use crate::state::error::ConfigError;
 
 const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "ogg", "flac", "wav", "aac", "m4a"];
+
+#[cfg(test)]
+mod scan_tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AudioFormat {
@@ -44,7 +47,15 @@ pub struct SoundEntry {
     pub path: PathBuf,
     pub format: AudioFormat,
     pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub modified_ms: Option<u64>,
     pub category: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LibraryScan {
+    pub entries: Vec<SoundEntry>,
+    pub complete: bool,
 }
 
 /// Generates a deterministic hex ID from a file path.
@@ -59,6 +70,19 @@ fn is_audio_extension(ext: &str) -> bool {
     SUPPORTED_EXTENSIONS
         .iter()
         .any(|&supported| supported.eq_ignore_ascii_case(ext))
+}
+
+pub(crate) fn system_time_to_epoch_ms(time: SystemTime) -> Option<u64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis()
+        .try_into()
+        .ok()
+}
+
+fn modified_ms(path: &Path) -> Option<u64> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    system_time_to_epoch_ms(modified)
 }
 
 /// Builds a SoundEntry from a validated audio file path.
@@ -85,6 +109,7 @@ fn entry_from_path(path: &Path) -> Option<SoundEntry> {
         path: path.to_path_buf(),
         format: AudioFormat::from_extension(ext),
         duration_ms: None,
+        modified_ms: modified_ms(path),
         category,
     })
 }
@@ -121,17 +146,22 @@ pub struct Library;
 impl Library {
     /// Recursively scans directories for audio files and returns
     /// a list of SoundEntry items.
-    pub fn scan(dirs: &[PathBuf]) -> Result<Vec<SoundEntry>, ConfigError> {
+    pub fn scan(dirs: &[PathBuf]) -> Result<LibraryScan, ConfigError> {
         let mut entries = Vec::new();
+        let mut complete = true;
 
         for dir in dirs {
-            if !dir.exists() {
+            if !dir.is_dir() {
+                complete = false;
                 continue;
             }
 
+            // An existing empty directory is complete: without compositor- or
+            // mount-specific APIs it is indistinguishable from an intentionally empty library.
             let walker = WalkDir::new(dir).follow_links(true);
             for result in walker {
                 let Ok(dir_entry) = result else {
+                    complete = false;
                     continue;
                 };
 
@@ -145,7 +175,7 @@ impl Library {
             }
         }
 
-        Ok(entries)
+        Ok(LibraryScan { entries, complete })
     }
 }
 
@@ -236,8 +266,9 @@ mod tests {
         fs::write(dir.path().join("quack.ogg"), b"fake ogg").unwrap();
         fs::write(dir.path().join("boom.flac"), b"fake flac").unwrap();
 
-        let entries = Library::scan(&[dir.path().to_path_buf()]).unwrap();
-        assert_eq!(entries.len(), 3);
+        let scan = Library::scan(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(scan.entries.len(), 3);
+        assert!(scan.complete);
     }
 
     #[test]
@@ -247,23 +278,24 @@ mod tests {
         fs::write(dir.path().join("image.png"), b"not audio").unwrap();
         fs::write(dir.path().join("sound.mp3"), b"audio").unwrap();
 
-        let entries = Library::scan(&[dir.path().to_path_buf()]).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].name, "sound");
-        assert_eq!(entries[0].format, AudioFormat::Mp3);
+        let scan = Library::scan(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(scan.entries.len(), 1);
+        assert_eq!(scan.entries[0].name, "sound");
+        assert_eq!(scan.entries[0].format, AudioFormat::Mp3);
     }
 
     #[test]
     fn scan_handles_empty_directory() {
         let dir = tempfile::tempdir().unwrap();
-        let entries = Library::scan(&[dir.path().to_path_buf()]).unwrap();
-        assert!(entries.is_empty());
+        let scan = Library::scan(&[dir.path().to_path_buf()]).unwrap();
+        assert!(scan.entries.is_empty());
+        assert!(scan.complete);
     }
 
     #[test]
     fn scan_handles_nonexistent_directory() {
-        let entries = Library::scan(&[PathBuf::from("/nonexistent/path/12345")]).unwrap();
-        assert!(entries.is_empty());
+        let scan = Library::scan(&[PathBuf::from("/nonexistent/path/12345")]).unwrap();
+        assert!(scan.entries.is_empty());
     }
 
     #[test]
@@ -274,8 +306,8 @@ mod tests {
         fs::write(dir.path().join("top.wav"), b"top").unwrap();
         fs::write(sub.join("nested.aac"), b"nested").unwrap();
 
-        let entries = Library::scan(&[dir.path().to_path_buf()]).unwrap();
-        assert_eq!(entries.len(), 2);
+        let scan = Library::scan(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(scan.entries.len(), 2);
     }
 
     #[test]
@@ -285,9 +317,8 @@ mod tests {
         fs::write(dir1.path().join("a.mp3"), b"a").unwrap();
         fs::write(dir2.path().join("b.flac"), b"b").unwrap();
 
-        let entries =
-            Library::scan(&[dir1.path().to_path_buf(), dir2.path().to_path_buf()]).unwrap();
-        assert_eq!(entries.len(), 2);
+        let scan = Library::scan(&[dir1.path().to_path_buf(), dir2.path().to_path_buf()]).unwrap();
+        assert_eq!(scan.entries.len(), 2);
     }
 
     #[test]
@@ -296,10 +327,10 @@ mod tests {
         let file_path = dir.path().join("my_sound.wav");
         fs::write(&file_path, b"wav data").unwrap();
 
-        let entries = Library::scan(&[dir.path().to_path_buf()]).unwrap();
-        assert_eq!(entries.len(), 1);
+        let scan = Library::scan(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(scan.entries.len(), 1);
 
-        let entry = &entries[0];
+        let entry = &scan.entries[0];
         assert_eq!(entry.name, "my_sound");
         assert_eq!(entry.path, file_path);
         assert_eq!(entry.format, AudioFormat::Wav);
@@ -315,9 +346,9 @@ mod tests {
         fs::create_dir(&memes).unwrap();
         fs::write(memes.join("honk.mp3"), b"data").unwrap();
 
-        let entries = Library::scan(&[dir.path().to_path_buf()]).unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].category, "Memes");
+        let scan = Library::scan(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(scan.entries.len(), 1);
+        assert_eq!(scan.entries[0].category, "Memes");
     }
 
     #[test]
@@ -325,8 +356,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("toplevel.mp3"), b"data").unwrap();
 
-        let entries = Library::scan(&[dir.path().to_path_buf()]).unwrap();
-        assert_eq!(entries.len(), 1);
+        let scan = Library::scan(&[dir.path().to_path_buf()]).unwrap();
+        assert_eq!(scan.entries.len(), 1);
 
         // A file at the root of the scan dir has no subdirectory parent,
         // so category falls back to the scan directory's own name.
@@ -336,6 +367,6 @@ mod tests {
             .unwrap()
             .to_string_lossy()
             .into_owned();
-        assert_eq!(entries[0].category, expected);
+        assert_eq!(scan.entries[0].category, expected);
     }
 }

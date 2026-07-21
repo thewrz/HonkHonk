@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::state::error::ConfigError;
+mod persistence;
 
 const META_FILE_NAME: &str = "sound_meta.json";
 const CONFIG_DIR_NAME: &str = "honkhonk";
+const META_FORMAT_VERSION: u32 = 1;
 
 /// Per-sound user customisations persisted independently of library scan.
 /// Keyed by sound ID (deterministic hex hash of file path).
@@ -45,26 +45,47 @@ impl SoundMeta {
 }
 
 /// In-memory store for all sound metadata, backed by a JSON file.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct SoundMetaStore(HashMap<String, SoundMeta>);
+#[derive(Debug, Clone, PartialEq)]
+pub struct SoundMetaStore {
+    custom: HashMap<String, SoundMeta>,
+    added: BTreeMap<String, u64>,
+    writable: bool,
+}
+
+impl Default for SoundMetaStore {
+    fn default() -> Self {
+        Self {
+            custom: HashMap::new(),
+            added: BTreeMap::new(),
+            writable: true,
+        }
+    }
+}
 
 impl SoundMetaStore {
+    fn read_protected() -> Self {
+        Self {
+            writable: false,
+            ..Self::default()
+        }
+    }
+
     /// Returns metadata for a sound, falling back to default if not set.
     pub fn get(&self, id: &str) -> SoundMeta {
-        self.0.get(id).cloned().unwrap_or_default()
+        self.custom.get(id).cloned().unwrap_or_default()
     }
 
     /// Returns a reference to the metadata if it exists.
     pub fn get_ref(&self, id: &str) -> Option<&SoundMeta> {
-        self.0.get(id)
+        self.custom.get(id)
     }
 
     /// Upserts metadata for a sound. Removes the entry if it becomes default.
     pub fn set(&mut self, id: String, meta: SoundMeta) {
         if meta.is_default() {
-            self.0.remove(&id);
+            self.custom.remove(&id);
         } else {
-            self.0.insert(id, meta);
+            self.custom.insert(id, meta);
         }
     }
 
@@ -93,62 +114,40 @@ impl SoundMetaStore {
 
     /// Returns `true` if the sound is a favorite.
     pub fn is_favorite(&self, id: &str) -> bool {
-        self.0.get(id).map(|m| m.favorite).unwrap_or(false)
+        self.custom.get(id).map(|m| m.favorite).unwrap_or(false)
     }
 
     /// Returns the per-sound volume multiplier (defaults to 1.0).
     pub fn volume_for(&self, id: &str) -> f32 {
-        self.0.get(id).map(|m| m.volume).unwrap_or(1.0)
+        self.custom.get(id).map(|m| m.volume).unwrap_or(1.0)
     }
 
-    fn meta_path() -> Result<std::path::PathBuf, ConfigError> {
-        let proj = directories::ProjectDirs::from("", "", CONFIG_DIR_NAME)
-            .ok_or(ConfigError::NoConfigDir)?;
-        Ok(proj.config_dir().join(META_FILE_NAME))
+    pub fn added_ms(&self, id: &str) -> Option<u64> {
+        self.added.get(id).copied()
     }
 
-    /// Loads the store from the default XDG path, returning an empty store on
-    /// any error (missing file, corrupt JSON).
-    pub fn load() -> Self {
-        Self::meta_path()
-            .ok()
-            .and_then(|p| std::fs::read_to_string(p).ok())
-            .and_then(|s| serde_json::from_str::<HashMap<String, SoundMeta>>(&s).ok())
-            .map(SoundMetaStore)
-            .unwrap_or_default()
-    }
+    pub fn reconcile_added<I, S>(&mut self, ids: I, observed_at_ms: u64, complete: bool) -> bool
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let observed: BTreeSet<String> = ids.into_iter().map(|id| id.as_ref().to_owned()).collect();
+        let mut changed = false;
 
-    /// Persists the store to the default XDG path.
-    pub fn save(&self) -> Result<(), ConfigError> {
-        self.save_to(&Self::meta_path()?)
-    }
-
-    /// Persists the store to an arbitrary path (used in tests).
-    pub fn save_to(&self, path: &Path) -> Result<(), ConfigError> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ConfigError::DirectoryCreation {
-                path: parent.display().to_string(),
-                source: e,
-            })?;
+        for id in &observed {
+            if !self.added.contains_key(id) {
+                self.added.insert(id.clone(), observed_at_ms);
+                changed = true;
+            }
         }
-        let json = serde_json::to_string_pretty(&self.0).map_err(|e| ConfigError::Serialize {
-            path: path.display().to_string(),
-            source: e,
-        })?;
-        std::fs::write(path, json).map_err(|e| ConfigError::Io {
-            path: path.display().to_string(),
-            source: e,
-        })?;
-        Ok(())
-    }
 
-    /// Loads from an arbitrary path (used in tests).
-    pub fn load_from(path: &Path) -> Self {
-        std::fs::read_to_string(path)
-            .ok()
-            .and_then(|s| serde_json::from_str::<HashMap<String, SoundMeta>>(&s).ok())
-            .map(SoundMetaStore)
-            .unwrap_or_default()
+        if complete {
+            let previous_len = self.added.len();
+            self.added.retain(|id, _| observed.contains(id));
+            changed |= self.added.len() != previous_len;
+        }
+
+        changed
     }
 }
 
@@ -201,7 +200,10 @@ mod tests {
         store.set_volume("id1", 1.5);
         // Reset to default
         store.set("id1".to_owned(), SoundMeta::default());
-        assert!(store.0.is_empty(), "default meta should be pruned from map");
+        assert!(
+            store.custom.is_empty(),
+            "default meta should be pruned from map"
+        );
     }
 
     #[test]
@@ -253,6 +255,41 @@ mod tests {
     }
 
     #[test]
+    fn corrupt_file_cannot_be_overwritten() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("bad.json");
+        std::fs::write(&path, b"not json!!!").unwrap();
+        let store = SoundMetaStore::load_from(&path);
+
+        assert!(store.save_to(&path).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"not json!!!");
+    }
+
+    #[test]
+    fn future_version_file_cannot_be_downgraded() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("future.json");
+        let future = r#"{"version":999,"custom":{},"added":{"abc":42}}"#;
+        std::fs::write(&path, future).unwrap();
+        let store = SoundMetaStore::load_from(&path);
+
+        assert!(store.save_to(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), future);
+    }
+
+    #[test]
+    fn malformed_envelope_without_version_cannot_be_overwritten() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("malformed-envelope.json");
+        let malformed = r#"{"custom":{"abc":{"favorite":true}},"added":{"abc":42}}"#;
+        std::fs::write(&path, malformed).unwrap();
+        let store = SoundMetaStore::load_from(&path);
+
+        assert!(store.save_to(&path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), malformed);
+    }
+
+    #[test]
     fn is_default_detects_all_fields_at_default() {
         assert!(SoundMeta::default().is_default());
         assert!(
@@ -262,5 +299,82 @@ mod tests {
             }
             .is_default()
         );
+    }
+
+    #[test]
+    fn reconcile_added_stamps_new_ids_once() {
+        let mut store = SoundMetaStore::default();
+
+        assert!(store.reconcile_added(["first", "second"], 1_000, true));
+        assert_eq!(store.added_ms("first"), Some(1_000));
+        assert_eq!(store.added_ms("second"), Some(1_000));
+        assert!(!store.reconcile_added(["first", "second"], 2_000, true));
+        assert_eq!(store.added_ms("first"), Some(1_000));
+    }
+
+    #[test]
+    fn complete_reconcile_prunes_unseen_ids() {
+        let mut store = SoundMetaStore::default();
+        store.reconcile_added(["kept", "removed"], 1_000, true);
+
+        assert!(store.reconcile_added(["kept"], 2_000, true));
+        assert_eq!(store.added_ms("kept"), Some(1_000));
+        assert_eq!(store.added_ms("removed"), None);
+    }
+
+    #[test]
+    fn partial_reconcile_preserves_unseen_ids() {
+        let mut store = SoundMetaStore::default();
+        store.reconcile_added(["observed", "temporarily-missing"], 1_000, true);
+
+        assert!(!store.reconcile_added(["observed"], 2_000, false));
+        assert_eq!(store.added_ms("temporarily-missing"), Some(1_000));
+    }
+
+    #[test]
+    fn load_from_accepts_legacy_top_level_metadata_map() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("legacy.json");
+        std::fs::write(
+            &path,
+            r#"{"abc":{"favorite":true,"volume":1.25,"display_name":"Honk"}}"#,
+        )
+        .unwrap();
+
+        let store = SoundMetaStore::load_from(&path);
+
+        assert!(store.is_favorite("abc"));
+        assert_eq!(store.get("abc").display_name.as_deref(), Some("Honk"));
+        assert_eq!(store.added_ms("abc"), None);
+        store.save_to(&path).unwrap();
+        assert!(SoundMetaStore::load_from(&path).is_favorite("abc"));
+    }
+
+    #[test]
+    fn versioned_store_round_trips_added_timestamps() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("meta.json");
+        let mut store = SoundMetaStore::default();
+        store.toggle_favorite("abc");
+        store.reconcile_added(["abc"], 4_242, true);
+
+        store.save_to(&path).unwrap();
+        let loaded = SoundMetaStore::load_from(&path);
+
+        assert!(loaded.is_favorite("abc"));
+        assert_eq!(loaded.added_ms("abc"), Some(4_242));
+        let json = std::fs::read_to_string(path).unwrap();
+        assert!(json.contains("\"version\""));
+        assert!(json.contains("\"custom\""));
+        assert!(json.contains("\"added\""));
+    }
+
+    #[test]
+    fn first_seen_timestamps_do_not_create_custom_metadata() {
+        let mut store = SoundMetaStore::default();
+
+        store.reconcile_added(["abc"], 1_000, true);
+
+        assert!(store.get_ref("abc").is_none());
     }
 }
