@@ -34,14 +34,15 @@ fn missing_tile_slots(tiles_in_row: usize, columns: usize) -> usize {
 }
 
 pub fn view_grid<'a>(
-    sounds: Vec<&'a SoundEntry>,
+    sounds: &'a [SoundEntry],
+    visible_indices: &'a [usize],
     playing: Option<&'a str>,
     grid: GridCtx<'a>,
 ) -> Element<'a, Message> {
     responsive(move |size| {
         let columns = tile_layout::responsive_columns(size.width, grid.columns, theme::space::LG);
 
-        view_grid_columns(&sounds, playing, grid, columns)
+        view_grid_columns(sounds, visible_indices, playing, grid, columns)
     })
     .width(Length::Fill)
     .height(Length::Shrink)
@@ -53,14 +54,15 @@ pub fn view_grid<'a>(
     reason = "grid builder preserves row chunking, tile gaps, and empty state in one layout path"
 )]
 fn view_grid_columns<'a>(
-    sounds: &[&'a SoundEntry],
+    sounds: &'a [SoundEntry],
+    visible_indices: &[usize],
     playing: Option<&'a str>,
     grid: GridCtx<'a>,
     columns: usize,
 ) -> Element<'a, Message> {
     let theme = Theme::Dark;
 
-    if sounds.is_empty() {
+    if visible_indices.is_empty() {
         return container(
             text("No sounds found. Add audio files to your sound directory.")
                 .size(theme::font::BODY)
@@ -82,11 +84,12 @@ fn view_grid_columns<'a>(
     // Keep invalid callers from reaching slice::chunks(0).
     let columns = columns.max(1);
 
-    let rows: Vec<Element<'a, Message>> = sounds
+    let rows: Vec<Element<'a, Message>> = visible_indices
         .chunks(columns)
         .map(|chunk| {
             let mut tiles: Vec<Element<'a, Message>> = chunk
                 .iter()
+                .filter_map(|&index| sounds.get(index))
                 .map(|sound| {
                     let is_playing = playing == Some(sound.id.as_str());
                     let tile = sound_tile::view(tile_data(sound, ctx), theme, is_playing);
@@ -98,7 +101,7 @@ fn view_grid_columns<'a>(
                 })
                 .collect();
 
-            tiles.extend((0..missing_tile_slots(chunk.len(), columns)).map(|_| {
+            tiles.extend((0..missing_tile_slots(tiles.len(), columns)).map(|_| {
                 Space::new()
                     .width(Length::Fill)
                     .height(tile_layout::tile_slot_height())
@@ -299,6 +302,18 @@ pub fn context_menu_overlay<'a>(
 mod tests {
     use super::*;
 
+    fn test_sound() -> SoundEntry {
+        SoundEntry {
+            id: "sound".into(),
+            name: "Sound".into(),
+            path: "/sounds/sound.wav".into(),
+            format: crate::state::AudioFormat::Wav,
+            duration_ms: None,
+            modified_ms: None,
+            category: "Test".into(),
+        }
+    }
+
     #[test]
     fn incomplete_rows_reserve_all_missing_tile_slots() {
         // Iced view rendering is intentionally not unit-tested here; this pins
@@ -308,5 +323,31 @@ mod tests {
         assert_eq!(missing_tile_slots(2, 5), 3);
         assert_eq!(missing_tile_slots(5, 5), 0);
         assert_eq!(missing_tile_slots(6, 5), 0);
+    }
+
+    #[test]
+    fn unresolved_indices_are_replaced_with_filler_slots() {
+        let sounds = [test_sound()];
+        let visible_indices = [0, 99];
+        let slots = SlotMap::default();
+        let triggers = std::array::from_fn(|_| None);
+        let sound_meta = SoundMetaStore::default();
+        let element = view_grid_columns(
+            &sounds,
+            &visible_indices,
+            None,
+            GridCtx {
+                slots: &slots,
+                triggers: &triggers,
+                shortcuts_active: false,
+                columns: 2,
+                sound_meta: &sound_meta,
+            },
+            2,
+        );
+        let tree = iced_core::widget::Tree::new(element.as_widget());
+
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].children.len(), 2);
     }
 }

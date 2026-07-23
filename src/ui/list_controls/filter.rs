@@ -83,17 +83,35 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    filter_indices(items, query, haystacks)
+        .into_iter()
+        .map(|index| &items[index])
+        .collect()
+}
+
+/// Returns the indices of items with at least one field containing `query`.
+///
+/// This is the cache-friendly form of [`filter_items`]: callers can retain
+/// stable positions without borrowing the input collection.
+pub fn filter_indices<'a, T, F, I, S>(items: &'a [T], query: &str, haystacks: F) -> Vec<usize>
+where
+    F: Fn(&'a T) -> I,
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
     if query.is_empty() {
-        return items.iter().collect();
+        return (0..items.len()).collect();
     }
 
     let needle = query.to_lowercase();
     items
         .iter()
-        .filter(|item| {
+        .enumerate()
+        .filter_map(|(index, item)| {
             haystacks(item)
                 .into_iter()
                 .any(|field| field.as_ref().to_lowercase().contains(&needle))
+                .then_some(index)
         })
         .collect()
 }
