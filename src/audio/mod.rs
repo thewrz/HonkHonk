@@ -1,3 +1,4 @@
+mod channel_repair;
 mod confd;
 mod decoder;
 pub mod effects;

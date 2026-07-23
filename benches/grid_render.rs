@@ -8,9 +8,7 @@ mod support;
 
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use support::{
-    GridFixture, init_wgpu, make_sounds, render_tiny_skia, self_check, sound_refs, try_render_wgpu,
-};
+use support::{GridFixture, init_wgpu, make_sounds, render_tiny_skia, self_check, try_render_wgpu};
 
 /// Tile counts ADR-009 anchors the baseline against.
 const SIZES: [usize; 3] = [50, 200, 500];
@@ -24,9 +22,9 @@ fn bench_tiny_skia(c: &mut Criterion) {
     for &n in &SIZES {
         let sounds = make_sounds(n);
         let fx = GridFixture::new();
-        let refs = sound_refs(&sounds);
+        let visible_indices = (0..sounds.len()).collect::<Vec<_>>();
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
-            b.iter(|| render_tiny_skia(&refs, fx.grid_ctx(COLUMNS)));
+            b.iter(|| render_tiny_skia(&sounds, &visible_indices, fx.grid_ctx(COLUMNS)));
         });
     }
     group.finish();
@@ -45,9 +43,9 @@ fn bench_wgpu(c: &mut Criterion) {
     for &n in &SIZES {
         let sounds = make_sounds(n);
         let fx = GridFixture::new();
-        let refs = sound_refs(&sounds);
+        let visible_indices = (0..sounds.len()).collect::<Vec<_>>();
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, _| {
-            b.iter(|| try_render_wgpu(&refs, fx.grid_ctx(COLUMNS), &gpu));
+            b.iter(|| try_render_wgpu(&sounds, &visible_indices, fx.grid_ctx(COLUMNS), &gpu));
         });
     }
     group.finish();

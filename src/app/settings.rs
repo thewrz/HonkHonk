@@ -7,6 +7,7 @@ use crate::settings::search::{RestoreTarget, RowRestoreRequest, ScrollOffset};
 
 impl HonkHonk {
     pub(super) fn show_settings(&mut self) -> Task<Message> {
+        self.dismiss_sound_sort_menu();
         self.view_mode = ViewMode::Settings;
         self.settings_ui.open();
         Task::none()
@@ -79,6 +80,16 @@ mod tests {
         assert_eq!(app.settings_ui.query(), "");
         assert_eq!(app.settings_ui.section(), SettingCategory::Audio);
         assert_eq!(app.view_mode, ViewMode::Settings);
+    }
+
+    #[test]
+    fn opening_settings_dismisses_sound_sort_menu() {
+        let mut app = HonkHonk::new_for_test();
+        app.toggle_sound_sort_menu();
+
+        let _ = app.show_settings();
+
+        assert!(app.sort_menu_anchor.is_none());
     }
 
     #[test]
