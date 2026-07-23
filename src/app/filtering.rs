@@ -2,7 +2,7 @@ use iced::event::Status;
 use iced::keyboard;
 use std::borrow::Cow;
 
-use super::{FAVORITES_TAB, HonkHonk, Message, ViewMode};
+use super::{FAVORITES_TAB, HonkHonk, Message, ViewMode, sorting};
 use crate::state::SoundEntry;
 use crate::ui::list_controls::filter::{Activation, ActivationContext, filter_items};
 use crate::ui::search_bar;
@@ -43,6 +43,7 @@ impl HonkHonk {
             || self.editor_sound_id.is_some()
             || self.macro_editor_draft.is_some()
             || self.effects_panel.is_visible()
+            || self.sort_menu_anchor.is_some()
     }
 
     pub(super) fn handle_type_to_filter(&mut self, text: &str) -> iced::Task<Message> {
@@ -55,6 +56,9 @@ impl HonkHonk {
     }
 
     pub(super) fn handle_escape(&mut self, event_was_captured: bool) -> iced::Task<Message> {
+        if self.dismiss_sound_sort_menu() {
+            return iced::Task::none();
+        }
         if self.context_menu.is_some() {
             self.context_menu = None;
             self.context_menu_pos = None;
@@ -78,7 +82,7 @@ impl HonkHonk {
 
     /// Returns sounds matching the shared query and active category filters.
     pub fn filtered_sounds(&self) -> Vec<&SoundEntry> {
-        filter_items(&self.sounds, self.filter.query(), |sound| {
+        let sounds = filter_items(&self.sounds, self.filter.query(), |sound| {
             let display_name = self
                 .sound_meta
                 .get_ref(&sound.id)
@@ -102,7 +106,8 @@ impl HonkHonk {
             Some(category) => sound.category == category,
             None => true,
         })
-        .collect()
+        .collect();
+        sorting::sorted_sounds(sounds, self.sound_sort, &self.sound_meta)
     }
 }
 
@@ -258,5 +263,28 @@ mod tests {
             let _ = app.update(Message::SearchChanged(query.into()));
             assert_eq!(app.filtered_sounds().len(), 1, "query: {query}");
         }
+    }
+
+    #[test]
+    fn main_grid_filter_results_follow_the_active_sort_state() {
+        let mut app = HonkHonk::new_for_test();
+        app.sounds = ["Zulu", "alpha"]
+            .into_iter()
+            .map(|name| SoundEntry {
+                id: name.into(),
+                name: name.into(),
+                path: format!("/sounds/{name}.wav").into(),
+                format: AudioFormat::Wav,
+                duration_ms: None,
+                category: "Other".into(),
+                modified_ms: None,
+            })
+            .collect();
+
+        assert_eq!(app.filtered_sounds()[0].name, "alpha");
+
+        let _ = app.update(Message::ToggleSoundSortDirection);
+
+        assert_eq!(app.filtered_sounds()[0].name, "Zulu");
     }
 }

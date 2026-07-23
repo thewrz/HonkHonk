@@ -18,12 +18,13 @@ use crate::ui::list_controls::filter::FilterState;
 use crate::ui::side_panel::{PanelAnim, PanelFlourish};
 use crate::ui::sound_grid;
 use crate::ui::theme::{self, Hh};
-use crate::ui::{now_playing, search_bar, slot_manager};
+use crate::ui::{now_playing, slot_manager};
 use notices::{Notice, NoticeId, NoticeQueue};
 
 /// Play-dispatch coordination (`request_play` / `handle_decoded` /
 /// `start_playback`), extracted to keep this file from growing (#151).
 mod filtering;
+mod header;
 mod library_scan;
 mod macros;
 #[cfg(test)]
@@ -33,6 +34,7 @@ pub(crate) mod notices;
 mod panels;
 mod playback;
 mod recording;
+mod sorting;
 
 /// Virtual category name used for the Favorites filtered tab.
 pub const FAVORITES_TAB: &str = "\u{2605} Favorites";
@@ -87,6 +89,10 @@ pub enum Message {
     },
     SelectCategory(Option<String>),
     SearchChanged(String),
+    ToggleSoundSortMenu,
+    ToggleSoundSortDirection,
+    SelectSoundSort(&'static str),
+    DismissSoundSortMenu,
     /// Seeds the active filter from an otherwise-unhandled printable keypress.
     TypeToFilter(String),
     /// Routes an uncaptured Escape through overlay and filter staging.
@@ -205,6 +211,8 @@ pub struct HonkHonk {
     active_category: Option<String>,
     pub(crate) config: AppConfig,
     filter: FilterState,
+    sound_sort: sorting::SoundSortState,
+    sort_menu_anchor: Option<Point>,
     progress: f32,
     slots: SlotMap,
     pub(crate) slot_triggers: [Option<String>; 20],
@@ -408,6 +416,7 @@ impl HonkHonk {
     ) -> Self {
         let rx = tray.take_rx();
         let sound_meta = library_scan::load_sound_meta(&scan);
+        let sound_sort = sorting::sound_sort_from_config(&config);
         let sounds = scan.entries;
         let duration_scan_pairs = std::sync::Arc::new(
             sounds
@@ -426,6 +435,8 @@ impl HonkHonk {
             active_category: None,
             config,
             filter: FilterState::default(),
+            sound_sort,
+            sort_menu_anchor: None,
             progress: 0.0,
             slots,
             slot_triggers: std::array::from_fn(|_| None),
@@ -476,6 +487,7 @@ impl HonkHonk {
     pub fn new_for_test() -> Self {
         let (_tx, rx) = std::sync::mpsc::channel();
         let config = AppConfig::default();
+        let sound_sort = sorting::sound_sort_from_config(&config);
         Self {
             visible: true,
             exit: false,
@@ -487,6 +499,8 @@ impl HonkHonk {
             active_category: None,
             config,
             filter: FilterState::default(),
+            sound_sort,
+            sort_menu_anchor: None,
             progress: 0.0,
             slots: SlotMap::default(),
             slot_triggers: std::array::from_fn(|_| None),
@@ -853,6 +867,22 @@ impl HonkHonk {
                 Task::none()
             }
             Message::TypeToFilter(text) => self.handle_type_to_filter(&text),
+            Message::ToggleSoundSortMenu => {
+                self.toggle_sound_sort_menu();
+                Task::none()
+            }
+            Message::ToggleSoundSortDirection => {
+                self.toggle_sound_sort_direction();
+                Task::none()
+            }
+            Message::SelectSoundSort(key) => {
+                self.select_sound_sort(key);
+                Task::none()
+            }
+            Message::DismissSoundSortMenu => {
+                self.dismiss_sound_sort_menu();
+                Task::none()
+            }
             Message::VolumeChanged(v) => {
                 self.config.volume = v.clamp(0.0, 1.0);
                 if let Some(ref audio) = self.audio {
@@ -948,16 +978,19 @@ impl HonkHonk {
                 Task::none()
             }
             Message::ShowSlots => {
+                self.dismiss_sound_sort_menu();
                 self.view_mode = ViewMode::SlotManager;
                 self.selected_slot = None;
                 Task::none()
             }
             Message::ShowMain => {
+                self.dismiss_sound_sort_menu();
                 self.view_mode = ViewMode::Main;
                 self.selected_slot = None;
                 Task::none()
             }
             Message::ShowSettings => {
+                self.dismiss_sound_sort_menu();
                 self.view_mode = ViewMode::Settings;
                 self.settings_section = SettingsSection::Audio;
                 Task::none()
@@ -1280,72 +1313,6 @@ impl HonkHonk {
         }
     }
 
-    fn view_header(&self, t: theme::Theme) -> Element<'_, Message> {
-        let title = text("HonkHonk").size(24).color(t.ink());
-
-        let slots_btn = button(text("Slots").size(14).color(t.ink()))
-            .on_press(Message::ShowSlots)
-            .style(move |_theme, _status| button::Style {
-                background: Some(theme::bg_color(t.panel())),
-                text_color: t.ink(),
-                border: theme::tile_border(t.hairline(), 1.0),
-                ..Default::default()
-            });
-
-        let settings_btn = button(text("Settings").size(14).color(t.ink()))
-            .on_press(Message::ShowSettings)
-            .style(move |_theme, _status| button::Style {
-                background: Some(theme::bg_color(t.panel())),
-                text_color: t.ink(),
-                border: theme::tile_border(t.hairline(), 1.0),
-                ..Default::default()
-            });
-
-        let search = search_bar::view_search_bar(self.filter.query(), Message::SearchChanged);
-
-        let record_btn = self.view_record_button(t);
-
-        let stop_btn = button(text("Stop All").size(14).color(t.ink()))
-            .on_press(Message::StopAll)
-            .style(move |_theme, _status| button::Style {
-                background: Some(theme::bg_color(t.panel())),
-                text_color: t.ink(),
-                border: theme::tile_border(t.hairline(), 1.0),
-                ..Default::default()
-            });
-
-        row![
-            title,
-            slots_btn,
-            settings_btn,
-            space::horizontal(),
-            search,
-            record_btn,
-            stop_btn
-        ]
-        .spacing(theme::space::LG)
-        .align_y(iced::Alignment::Center)
-        .into()
-    }
-
-    fn view_record_button(&self, t: theme::Theme) -> Element<'_, Message> {
-        let (record_label, record_msg) = if self.is_recording() {
-            ("\u{25a0} Stop", Message::StopRecording)
-        } else {
-            ("\u{25cf} Record", Message::StartRecording)
-        };
-
-        button(text(record_label).size(14).color(t.ink()))
-            .on_press(record_msg)
-            .style(move |_theme, _status| button::Style {
-                background: Some(theme::bg_color(t.panel())),
-                text_color: t.ink(),
-                border: theme::tile_border(t.hairline(), 1.0),
-                ..Default::default()
-            })
-            .into()
-    }
-
     fn view_category_chips(&self, t: theme::Theme) -> Element<'_, Message> {
         use std::collections::BTreeSet;
 
@@ -1617,7 +1584,9 @@ impl HonkHonk {
         ));
 
         // Overlay context menu at window level so cursor coords map exactly.
-        if let (Some(sound_id), Some(pos)) = (&self.context_menu, self.context_menu_pos) {
+        if let Some(sort_menu) = self.view_sound_sort_overlay(t) {
+            layers.push(sort_menu);
+        } else if let (Some(sound_id), Some(pos)) = (&self.context_menu, self.context_menu_pos) {
             let found = self.sounds.iter().find(|s| s.id == *sound_id);
             layers.push(sound_grid::context_menu_overlay(
                 found,
