@@ -2,7 +2,7 @@ use iced::advanced::widget::operation::{Operation, Outcome, Scrollable};
 use iced::widget::Id;
 use iced::{Rectangle, Task, Vector};
 
-use crate::app::Message;
+use crate::app::{Message, SettingsMessage};
 use crate::settings::SettingId;
 use crate::settings::search::RowRestoreRequest;
 
@@ -18,7 +18,7 @@ pub(super) fn row_id(setting: SettingId) -> Id {
 
 pub(crate) fn locate_setting_row(request: RowRestoreRequest) -> Task<Message> {
     iced::advanced::widget::operate(FindRowOffset::new(request.setting()))
-        .map(move |offset| Message::SettingsRowLocated { request, offset })
+        .map(move |offset| SettingsMessage::RowLocated { request, offset }.into())
 }
 
 fn setting_key(setting: SettingId) -> &'static str {

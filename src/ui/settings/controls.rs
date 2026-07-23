@@ -3,7 +3,7 @@ use iced::{
     widget::{button, container, row, text},
 };
 
-use crate::app::{HonkHonk, Message};
+use crate::app::{HonkHonk, Message, SettingsMessage};
 use crate::settings::{ControlType, SettingDef, SettingId, SettingValue};
 use crate::ui::theme::{self, Hh, Theme};
 
@@ -157,10 +157,11 @@ pub fn setting_message(id: SettingId, value: SettingValue) -> Message {
 }
 
 fn tracked_setting_message(id: SettingId, value: SettingValue) -> Message {
-    Message::SettingInteracted {
+    SettingsMessage::Interacted {
         id,
         action: Box::new(setting_message(id, value)),
     }
+    .into()
 }
 
 fn render_toggle(id: SettingId, value: bool, t: Theme) -> Element<'static, Message> {

@@ -1,7 +1,7 @@
 use iced::Element;
 use iced::widget::{button, row, space, text};
 
-use super::{HonkHonk, Message};
+use super::{HonkHonk, Message, SettingsMessage};
 use crate::ui::list_controls::sort;
 use crate::ui::search_bar;
 use crate::ui::theme::{self, Hh};
@@ -10,7 +10,7 @@ impl HonkHonk {
     pub(super) fn view_header(&self, theme: theme::Theme) -> Element<'_, Message> {
         let title = text("HonkHonk").size(24).color(theme.ink());
         let slots = nav_button("Slots", Message::ShowSlots, theme);
-        let settings = nav_button("Settings", Message::ShowSettings, theme);
+        let settings = nav_button("Settings", SettingsMessage::Show.into(), theme);
         let search = search_bar::view_search_bar(self.filter.query(), Message::SearchChanged);
         let sort = sort::view_sort_chip(
             self.sound_sort,

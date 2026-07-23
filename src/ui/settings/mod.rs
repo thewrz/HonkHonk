@@ -10,7 +10,7 @@ use iced::{
     widget::{button, column, container, row, scrollable, text},
 };
 
-use crate::app::{HonkHonk, Message, SettingsSection};
+use crate::app::{HonkHonk, Message, SettingsMessage, SettingsSection};
 use crate::ui::theme::{self, Hh, Theme};
 use crate::ui::{search_bar, settings::common::section_layout};
 
@@ -98,11 +98,9 @@ fn settings_sidebar(state: &HonkHonk, t: Theme) -> Element<'_, Message> {
             column.push(sidebar_button(section, active, t))
         });
 
-    let search = search_bar::view_settings_search_bar(
-        state.settings_ui.query(),
-        t,
-        Message::SettingsSearchChanged,
-    );
+    let search = search_bar::view_settings_search_bar(state.settings_ui.query(), t, |query| {
+        SettingsMessage::SearchChanged(query).into()
+    });
 
     container(
         column![search, nav]
@@ -146,7 +144,7 @@ fn sidebar_button(
                 ..Default::default()
             }),
     )
-    .on_press(Message::ShowSettingsSection(section))
+    .on_press(SettingsMessage::ShowSection(section).into())
     .width(Length::Fill)
     .padding([theme::space::SM, theme::space::MD])
     .style(move |_t, _s| button::Style {
@@ -180,7 +178,7 @@ fn settings_content<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
             .padding([theme::space::XL, theme::space::XXL]),
     )
     .id(content_scroll_id())
-    .on_scroll(|viewport| Message::SettingsScrolled(viewport.absolute_offset()))
+    .on_scroll(|viewport| SettingsMessage::Scrolled(viewport.absolute_offset()).into())
     .height(Length::Fill)
     .into()
 }

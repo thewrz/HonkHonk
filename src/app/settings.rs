@@ -5,7 +5,44 @@ use super::{HonkHonk, Message, SettingsSection, ViewMode};
 use crate::settings::SettingId;
 use crate::settings::search::{RestoreTarget, RowRestoreRequest, ScrollOffset};
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum SettingsMessage {
+    Show,
+    ShowSection(SettingsSection),
+    SearchChanged(String),
+    Scrolled(AbsoluteOffset),
+    Interacted {
+        id: SettingId,
+        action: Box<Message>,
+    },
+    RowLocated {
+        request: RowRestoreRequest,
+        offset: f32,
+    },
+}
+
+impl From<SettingsMessage> for Message {
+    fn from(message: SettingsMessage) -> Self {
+        Self::Settings(message)
+    }
+}
+
 impl HonkHonk {
+    pub(super) fn update_settings(&mut self, message: SettingsMessage) -> Task<Message> {
+        match message {
+            SettingsMessage::Show => self.show_settings(),
+            SettingsMessage::ShowSection(section) => self.show_settings_section(section),
+            SettingsMessage::SearchChanged(query) => self.change_settings_search(query),
+            SettingsMessage::Scrolled(offset) => self.record_settings_scroll(offset),
+            SettingsMessage::Interacted { id, action } => {
+                self.handle_setting_interaction(id, *action)
+            }
+            SettingsMessage::RowLocated { request, offset } => {
+                self.restore_settings_row(request, offset)
+            }
+        }
+    }
+
     pub(super) fn show_settings(&mut self) -> Task<Message> {
         self.dismiss_sound_sort_menu();
         self.view_mode = ViewMode::Settings;
