@@ -1,7 +1,9 @@
-/// Central settings registry — pure metadata, zero coupling to app state.
-/// To add a new setting: add to SettingId, add SettingDef to SETTINGS_REGISTRY,
-/// add arms to get_setting_value and setting_message in src/ui/settings/controls.rs,
-/// add Message variant + update() handler in src/app/mod.rs.
+//! Central settings registry — pure metadata, zero coupling to app state.
+//! To add a new setting: add to `SettingId`, add a `SettingDef` to
+//! `SETTINGS_REGISTRY`, add arms to `get_setting_value` and `setting_message` in
+//! `src/ui/settings/controls.rs`, then add a `Message` variant and `update()` handler
+//! in `src/app/mod.rs`.
+
 pub mod search;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
