@@ -53,6 +53,7 @@ pub use crate::settings::SettingCategory as SettingsSection;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
+    NoOp,
     ToggleVisibility,
     Quit,
     TrayEvent(TrayEvent),
@@ -665,6 +666,7 @@ impl HonkHonk {
     )]
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::NoOp => Task::none(),
             Message::ToggleVisibility => {
                 self.visible = !self.visible;
                 if !self.visible {

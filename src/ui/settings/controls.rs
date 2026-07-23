@@ -164,8 +164,8 @@ pub fn setting_message(id: SettingId, value: SettingValue) -> Message {
             crate::state::Renderer::TinySkia
         }),
         other => {
-            debug_assert!(false, "setting_message: unhandled {other:?}");
-            Message::RescanLibrary
+            tracing::error!(?other, "setting_message: unhandled setting/value combo");
+            Message::NoOp
         }
     }
 }
@@ -232,4 +232,44 @@ fn render_slider(
     .spacing(theme::space::SM)
     .align_y(Alignment::Center)
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::SETTINGS_REGISTRY;
+
+    #[test]
+    fn invalid_setting_value_never_triggers_a_real_action() {
+        let result = std::panic::catch_unwind(|| {
+            setting_message(SettingId::Theme, SettingValue::Bool(true))
+        });
+        let message = result.expect("invalid setting values must degrade safely");
+
+        assert_eq!(message, Message::NoOp);
+    }
+
+    #[test]
+    fn every_registry_control_has_a_message_mapping() {
+        for setting in SETTINGS_REGISTRY {
+            let value = representative_value(setting.control);
+            let message = setting_message(setting.id, value);
+
+            assert!(
+                !matches!(message, Message::NoOp),
+                "{:?} has no setting-message mapping",
+                setting.id
+            );
+        }
+    }
+
+    fn representative_value(control: ControlType) -> SettingValue {
+        match control {
+            ControlType::Toggle => SettingValue::Bool(true),
+            ControlType::Radio(_) => SettingValue::Index(0),
+            ControlType::Slider { min, .. } => SettingValue::F32(min),
+            ControlType::Button => SettingValue::None,
+            ControlType::Select => SettingValue::None,
+        }
+    }
 }
