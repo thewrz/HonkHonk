@@ -10,4 +10,4 @@ pub use error::ConfigError;
 pub use library::{AudioFormat, Library, LibraryScan, SoundEntry};
 pub use macros::{Macro, MacroStore, Step};
 pub use slots::SlotMap;
-pub use sound_meta::{SoundMeta, SoundMetaStore};
+pub use sound_meta::{GraphicAssetRef, GraphicRefError, SoundMeta, SoundMetaStore};

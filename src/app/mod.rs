@@ -1194,9 +1194,9 @@ impl HonkHonk {
                     Some(self.editor_draft_name.trim().to_owned())
                 };
                 let meta = SoundMeta {
-                    favorite: self.sound_meta.get(&sound_id).favorite,
                     volume: self.editor_draft_volume,
                     display_name,
+                    ..self.sound_meta.get(&sound_id)
                 };
                 self.sound_meta.set(sound_id, meta);
                 if self.persist {
