@@ -91,6 +91,17 @@ fn clear_removes_either_content_kind_and_out_of_range_set_macro_is_noop() {
 }
 
 #[test]
+fn out_of_range_set_macro_skips_id_validation_and_mutation() {
+    let mut slots = SlotMap::default();
+    let original = PathBuf::from("/sounds/original.wav");
+    slots.set(0, original.clone());
+
+    assert_eq!(slots.set_macro(200, ""), Ok(()));
+    assert_eq!(slots.get(0), Some(&original));
+    assert!(slots.slot_for_macro("").is_none());
+}
+
+#[test]
 fn invalid_macro_ids_are_typed_errors_and_do_not_replace_content() {
     let mut slots = SlotMap::default();
     let original = PathBuf::from("/sounds/original.wav");

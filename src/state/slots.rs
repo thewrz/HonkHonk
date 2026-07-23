@@ -98,10 +98,11 @@ impl SlotMap {
 
     /// Assigns a validated macro ID. An out-of-range index is a no-op.
     pub fn set_macro(&mut self, idx: u8, id: impl Into<String>) -> Result<(), MacroIdError> {
+        let Some(slot) = self.slots.get_mut(idx as usize) else {
+            return Ok(());
+        };
         let content = SlotContent::macro_with_id(id.into())?;
-        if let Some(slot) = self.slots.get_mut(idx as usize) {
-            *slot = Some(content);
-        }
+        *slot = Some(content);
         Ok(())
     }
 
