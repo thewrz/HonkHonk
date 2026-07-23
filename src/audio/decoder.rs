@@ -8,7 +8,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-use super::error::AudioError;
+use super::{channel_repair::repair_dead_stereo_channel, error::AudioError};
 
 pub struct DecodedAudio {
     pub samples: Vec<f32>,
@@ -63,11 +63,14 @@ pub fn decode(path: &Path) -> Result<DecodedAudio, AudioError> {
         .or(decoded.channels)
         .ok_or(AudioError::MissingCodecParams)?;
 
-    let total_frames = decoded.samples.len() as u64 / channels as u64;
+    let mut samples = decoded.samples;
+    repair_dead_stereo_channel(&mut samples, sample_rate, channels);
+
+    let total_frames = samples.len() as u64 / channels as u64;
     let duration = Duration::from_secs_f64(total_frames as f64 / sample_rate as f64);
 
     Ok(DecodedAudio {
-        samples: decoded.samples,
+        samples,
         sample_rate,
         channels,
         duration,
