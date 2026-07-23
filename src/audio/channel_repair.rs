@@ -4,6 +4,8 @@
 
 const DEAD_CHANNEL_PEAK: f32 = 0.000_1;
 const LIVE_CHANNEL_RMS: f32 = 0.003_162_277_7;
+// Bound cancellation drift independently of clip length with about 3% extra energy work.
+const ENERGY_REBASE_WINDOWS: usize = 16;
 
 /// Copies a meaningful live lane over one dead lane, returning whether it did so.
 pub(super) fn repair_dead_stereo_channel(
@@ -48,18 +50,14 @@ fn has_live_block(samples: &[f32], sample_rate: u32, lane: usize) -> bool {
     let frames_per_block = (sample_rate as usize / 20).max(1);
     let frame_count = samples.len() / 2;
     let window_frames = frames_per_block.min(frame_count);
-    let mut energy = samples[..window_frames * 2]
-        .chunks_exact(2)
-        .map(|frame| sample_energy(frame[lane]))
-        .sum();
+    let mut energy = window_energy(samples, lane, 0, window_frames);
     if energy_is_live(energy, window_frames) {
         return true;
     }
 
     for incoming_frame in window_frames..frame_count {
-        let outgoing_frame = incoming_frame - window_frames;
-        energy += sample_energy(samples[incoming_frame * 2 + lane]);
-        energy -= sample_energy(samples[outgoing_frame * 2 + lane]);
+        let window_start = incoming_frame + 1 - window_frames;
+        energy = advance_window_energy(samples, lane, window_start, window_frames, energy);
         if energy_is_live(energy, window_frames) {
             return true;
         }
@@ -69,6 +67,31 @@ fn has_live_block(samples: &[f32], sample_rate: u32, lane: usize) -> bool {
 
 fn sample_energy(sample: f32) -> f64 {
     f64::from(sample).powi(2)
+}
+
+fn window_energy(samples: &[f32], lane: usize, window_start: usize, window_frames: usize) -> f64 {
+    samples[window_start * 2..(window_start + window_frames) * 2]
+        .chunks_exact(2)
+        .map(|frame| sample_energy(frame[lane]))
+        .sum()
+}
+
+fn advance_window_energy(
+    samples: &[f32],
+    lane: usize,
+    window_start: usize,
+    window_frames: usize,
+    energy: f64,
+) -> f64 {
+    let rebase_interval = window_frames * ENERGY_REBASE_WINDOWS;
+    if window_start % rebase_interval == 0 {
+        return window_energy(samples, lane, window_start, window_frames);
+    }
+
+    let incoming_frame = window_start + window_frames - 1;
+    let outgoing_frame = window_start - 1;
+    energy + sample_energy(samples[incoming_frame * 2 + lane])
+        - sample_energy(samples[outgoing_frame * 2 + lane])
 }
 
 fn energy_is_live(energy: f64, frames: usize) -> bool {
@@ -246,6 +269,26 @@ mod tests {
 
         assert!(repair_dead_stereo_channel(&mut samples, SAMPLE_RATE, 2));
         assert_eq!(samples, stereo(&right, &right));
+    }
+
+    #[test]
+    fn sliding_energy_stays_anchored_to_the_current_window() {
+        const CYCLES: usize = 200_000;
+        const PATTERN: [f32; 4] = [0.002_5, 0.000_1, 0.003, 0.000_01];
+
+        let frame_count = 1 + CYCLES * PATTERN.len();
+        let mut samples = Vec::with_capacity(frame_count * 2);
+        for frame in 0..frame_count {
+            samples.extend_from_slice(&[0.0, PATTERN[frame % PATTERN.len()]]);
+        }
+
+        let mut energy = window_energy(&samples, 1, 0, 1);
+        for window_start in 1..frame_count {
+            energy = advance_window_energy(&samples, 1, window_start, 1, energy);
+        }
+
+        let exact = window_energy(&samples, 1, frame_count - 1, 1);
+        assert!((energy - exact).abs() <= f64::EPSILON);
     }
 
     #[test]
