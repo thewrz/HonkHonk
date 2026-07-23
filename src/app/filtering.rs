@@ -1,11 +1,11 @@
 use iced::event::Status;
 use iced::keyboard;
-use std::borrow::Cow;
 
-use super::{FAVORITES_TAB, HonkHonk, Message, ViewMode, sorting};
-use crate::state::SoundEntry;
-use crate::ui::list_controls::filter::{Activation, ActivationContext, filter_items};
+use super::{HonkHonk, Message, ViewMode};
+use crate::ui::list_controls::filter::{Activation, ActivationContext};
 use crate::ui::search_bar;
+
+mod cache;
 
 pub(super) fn type_to_filter_text(event: &iced::Event, status: Status) -> Option<String> {
     if status != Status::Ignored {
@@ -30,6 +30,22 @@ pub(super) fn type_to_filter_text(event: &iced::Event, status: Status) -> Option
 }
 
 impl HonkHonk {
+    pub(super) fn select_sound_category(&mut self, category: Option<String>) {
+        if self.active_category == category {
+            return;
+        }
+        self.active_category = category;
+        self.refresh_filtered_sounds();
+    }
+
+    pub(super) fn replace_filter_query(&mut self, query: String) {
+        let changed = self.filter.query() != query;
+        self.filter.replace(query);
+        if changed {
+            self.refresh_filtered_sounds();
+        }
+    }
+
     fn filter_context(&self) -> ActivationContext {
         let activation = match self.view_mode {
             ViewMode::Main => Activation::TypeToFilter,
@@ -52,6 +68,9 @@ impl HonkHonk {
         }
 
         self.filter.insert(text);
+        if !text.is_empty() {
+            self.refresh_filtered_sounds();
+        }
         iced::widget::operation::focus(search_bar::input_id())
     }
 
@@ -75,39 +94,13 @@ impl HonkHonk {
         } else if event_was_captured {
             self.filter.consume_focus();
         } else {
+            let query_was_present = !self.filter.query().is_empty();
             self.filter.escape();
+            if query_was_present && self.filter.query().is_empty() {
+                self.refresh_filtered_sounds();
+            }
         }
         iced::Task::none()
-    }
-
-    /// Returns sounds matching the shared query and active category filters.
-    pub fn filtered_sounds(&self) -> Vec<&SoundEntry> {
-        let sounds = filter_items(&self.sounds, self.filter.query(), |sound| {
-            let display_name = self
-                .sound_meta
-                .get_ref(&sound.id)
-                .and_then(|meta| meta.display_name.as_deref())
-                .unwrap_or("");
-            let filename = sound
-                .path
-                .file_name()
-                .map(std::ffi::OsStr::to_string_lossy)
-                .unwrap_or_default();
-            [
-                Cow::Borrowed(display_name),
-                filename,
-                Cow::Borrowed(sound.name.as_str()),
-                Cow::Borrowed(sound.category.as_str()),
-            ]
-        })
-        .into_iter()
-        .filter(|sound| match self.active_category.as_deref() {
-            Some(FAVORITES_TAB) => self.sound_meta.is_favorite(&sound.id),
-            Some(category) => sound.category == category,
-            None => true,
-        })
-        .collect();
-        sorting::sorted_sounds(sounds, self.sound_sort, &self.sound_meta)
     }
 }
 
@@ -118,7 +111,27 @@ mod tests {
     use iced::keyboard::{self, Key, Location, Modifiers};
 
     use super::*;
-    use crate::state::{AudioFormat, Macro};
+    use crate::app::FAVORITES_TAB;
+    use crate::state::{AudioFormat, Macro, SoundEntry};
+
+    fn sound(id: &str, name: &str, duration_ms: Option<u64>, category: &str) -> SoundEntry {
+        SoundEntry {
+            id: id.into(),
+            name: name.into(),
+            path: format!("/sounds/{category}/{id}.wav").into(),
+            format: AudioFormat::Wav,
+            duration_ms,
+            category: category.into(),
+            modified_ms: None,
+        }
+    }
+
+    fn filtered_ids(app: &HonkHonk) -> Vec<&str> {
+        app.filtered_sounds()
+            .into_iter()
+            .map(|sound| sound.id.as_str())
+            .collect()
+    }
 
     fn key_event(text: Option<&str>, modifiers: Modifiers) -> iced::Event {
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
@@ -268,23 +281,92 @@ mod tests {
     #[test]
     fn main_grid_filter_results_follow_the_active_sort_state() {
         let mut app = HonkHonk::new_for_test();
-        app.sounds = ["Zulu", "alpha"]
-            .into_iter()
-            .map(|name| SoundEntry {
-                id: name.into(),
-                name: name.into(),
-                path: format!("/sounds/{name}.wav").into(),
-                format: AudioFormat::Wav,
-                duration_ms: None,
-                category: "Other".into(),
-                modified_ms: None,
-            })
-            .collect();
+        app.sounds = vec![
+            sound("zulu", "Zulu", None, "Other"),
+            sound("alpha", "alpha", None, "Other"),
+        ];
+        app.refresh_filtered_sounds();
 
         assert_eq!(app.filtered_sounds()[0].name, "alpha");
 
         let _ = app.update(Message::ToggleSoundSortDirection);
 
         assert_eq!(app.filtered_sounds()[0].name, "Zulu");
+    }
+
+    #[test]
+    fn filtered_sounds_reads_cached_order_without_resorting() {
+        let mut app = HonkHonk::new_for_test();
+        app.sounds = vec![
+            sound("zulu", "Zulu", None, "Other"),
+            sound("alpha", "alpha", None, "Other"),
+        ];
+        app.refresh_filtered_sounds();
+
+        assert_eq!(filtered_ids(&app), vec!["alpha", "zulu"]);
+        app.sound_sort.toggle_direction();
+
+        assert_eq!(
+            filtered_ids(&app),
+            vec!["alpha", "zulu"],
+            "reading filtered sounds must not recompute their order"
+        );
+    }
+
+    #[test]
+    fn query_category_and_favorite_updates_refresh_cached_membership() {
+        let mut app = HonkHonk::new_for_test();
+        app.sounds = vec![
+            sound("alpha", "Alpha", None, "Animals"),
+            sound("beta", "Beta", None, "Memes"),
+        ];
+        app.refresh_filtered_sounds();
+
+        let _ = app.update(Message::SearchChanged("beta".into()));
+        assert_eq!(filtered_ids(&app), vec!["beta"]);
+
+        let _ = app.update(Message::SearchChanged(String::new()));
+        let _ = app.update(Message::SelectCategory(Some("Animals".into())));
+        assert_eq!(filtered_ids(&app), vec!["alpha"]);
+
+        let _ = app.update(Message::SelectCategory(None));
+        let _ = app.update(Message::TypeToFilter("beta".into()));
+        assert_eq!(filtered_ids(&app), vec!["beta"]);
+        let _ = app.update(Message::EscapePressed);
+        let _ = app.update(Message::EscapePressed);
+        assert_eq!(filtered_ids(&app), vec!["alpha", "beta"]);
+
+        let _ = app.update(Message::ToggleFavorite("beta".into()));
+        let _ = app.update(Message::SelectCategory(Some(FAVORITES_TAB.into())));
+        assert_eq!(filtered_ids(&app), vec!["beta"]);
+
+        let _ = app.update(Message::ToggleFavorite("beta".into()));
+        assert_eq!(filtered_ids(&app), vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn duration_and_display_name_updates_refresh_cached_order() {
+        let mut app = HonkHonk::new_for_test();
+        app.sounds = vec![
+            sound("alpha", "Alpha", Some(200), "Other"),
+            sound("zulu", "Zulu", None, "Other"),
+        ];
+        app.refresh_filtered_sounds();
+
+        let _ = app.update(Message::SelectSoundSort("length"));
+        assert_eq!(filtered_ids(&app), vec!["alpha", "zulu"]);
+
+        let durations = std::collections::HashMap::from([("zulu".to_owned(), 100)]);
+        let _ = app.update(Message::DurationsLoaded(durations));
+        assert_eq!(filtered_ids(&app), vec!["zulu", "alpha"]);
+
+        let _ = app.update(Message::SelectSoundSort("name"));
+        let _ = app.update(Message::OpenSoundEditor("zulu".into()));
+        let _ = app.update(Message::SoundEditorNameChanged("Aardvark".into()));
+        let _ = app.update(Message::SaveSoundMeta("zulu".into()));
+        assert_eq!(filtered_ids(&app), vec!["zulu", "alpha"]);
+
+        let _ = app.update(Message::SearchChanged("aardvark".into()));
+        assert_eq!(filtered_ids(&app), vec!["zulu"]);
     }
 }

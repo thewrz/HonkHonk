@@ -34,14 +34,15 @@ fn missing_tile_slots(tiles_in_row: usize, columns: usize) -> usize {
 }
 
 pub fn view_grid<'a>(
-    sounds: Vec<&'a SoundEntry>,
+    sounds: &'a [SoundEntry],
+    visible_indices: &'a [usize],
     playing: Option<&'a str>,
     grid: GridCtx<'a>,
 ) -> Element<'a, Message> {
     responsive(move |size| {
         let columns = tile_layout::responsive_columns(size.width, grid.columns, theme::space::LG);
 
-        view_grid_columns(&sounds, playing, grid, columns)
+        view_grid_columns(sounds, visible_indices, playing, grid, columns)
     })
     .width(Length::Fill)
     .height(Length::Shrink)
@@ -53,14 +54,15 @@ pub fn view_grid<'a>(
     reason = "grid builder preserves row chunking, tile gaps, and empty state in one layout path"
 )]
 fn view_grid_columns<'a>(
-    sounds: &[&'a SoundEntry],
+    sounds: &'a [SoundEntry],
+    visible_indices: &[usize],
     playing: Option<&'a str>,
     grid: GridCtx<'a>,
     columns: usize,
 ) -> Element<'a, Message> {
     let theme = Theme::Dark;
 
-    if sounds.is_empty() {
+    if visible_indices.is_empty() {
         return container(
             text("No sounds found. Add audio files to your sound directory.")
                 .size(theme::font::BODY)
@@ -82,11 +84,12 @@ fn view_grid_columns<'a>(
     // Keep invalid callers from reaching slice::chunks(0).
     let columns = columns.max(1);
 
-    let rows: Vec<Element<'a, Message>> = sounds
+    let rows: Vec<Element<'a, Message>> = visible_indices
         .chunks(columns)
         .map(|chunk| {
             let mut tiles: Vec<Element<'a, Message>> = chunk
                 .iter()
+                .filter_map(|&index| sounds.get(index))
                 .map(|sound| {
                     let is_playing = playing == Some(sound.id.as_str());
                     let tile = sound_tile::view(tile_data(sound, ctx), theme, is_playing);

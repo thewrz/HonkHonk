@@ -10,7 +10,7 @@ use crate::audio::effects::EffectSlot;
 use crate::audio::{AudioCommand, AudioEvent, AudioHandle, PlayMode};
 use crate::shortcuts::ShortcutsStatus;
 use crate::state::config::{Density, OverlapMode};
-use crate::state::{AppConfig, LibraryScan, SlotMap, SoundEntry, SoundMeta, SoundMetaStore};
+use crate::state::{AppConfig, LibraryScan, SlotMap, SoundEntry, SoundMetaStore};
 use crate::tray::{TrayEvent, TrayHandle};
 use crate::ui::effects_panel::{self, EffectsUiState, PresetId};
 use crate::ui::effects_panel_view;
@@ -35,6 +35,7 @@ mod panels;
 mod playback;
 mod recording;
 mod sorting;
+mod sound_metadata;
 
 /// Virtual category name used for the Favorites filtered tab.
 pub const FAVORITES_TAB: &str = "\u{2605} Favorites";
@@ -212,6 +213,7 @@ pub struct HonkHonk {
     pub(crate) config: AppConfig,
     filter: FilterState,
     sound_sort: sorting::SoundSortState,
+    filtered_sound_indices: Vec<usize>,
     sort_menu_anchor: Option<Point>,
     progress: f32,
     slots: SlotMap,
@@ -424,7 +426,7 @@ impl HonkHonk {
                 .map(|s| (s.id.clone(), s.path.clone()))
                 .collect::<Vec<_>>(),
         );
-        Self {
+        let mut app = Self {
             visible: true,
             exit: false,
             tray_rx: Arc::new(Mutex::new(rx)),
@@ -436,6 +438,7 @@ impl HonkHonk {
             config,
             filter: FilterState::default(),
             sound_sort,
+            filtered_sound_indices: Vec::new(),
             sort_menu_anchor: None,
             progress: 0.0,
             slots,
@@ -477,7 +480,9 @@ impl HonkHonk {
             macro_playback: None,
             macro_run_id: 0,
             macro_voice_seq: 0,
-        }
+        };
+        app.refresh_filtered_sounds();
+        app
     }
 
     #[allow(
@@ -488,7 +493,7 @@ impl HonkHonk {
         let (_tx, rx) = std::sync::mpsc::channel();
         let config = AppConfig::default();
         let sound_sort = sorting::sound_sort_from_config(&config);
-        Self {
+        let mut app = Self {
             visible: true,
             exit: false,
             tray_rx: Arc::new(Mutex::new(rx)),
@@ -500,6 +505,7 @@ impl HonkHonk {
             config,
             filter: FilterState::default(),
             sound_sort,
+            filtered_sound_indices: Vec::new(),
             sort_menu_anchor: None,
             progress: 0.0,
             slots: SlotMap::default(),
@@ -541,7 +547,9 @@ impl HonkHonk {
             macro_playback: None,
             macro_run_id: 0,
             macro_voice_seq: 0,
-        }
+        };
+        app.refresh_filtered_sounds();
+        app
     }
 
     pub fn should_exit(&self) -> bool {
@@ -857,13 +865,13 @@ impl HonkHonk {
                 result,
             ),
             Message::SelectCategory(cat) => {
-                self.active_category = cat;
+                self.select_sound_category(cat);
                 Task::none()
             }
             Message::EscapePressed => self.handle_escape(false),
             Message::CapturedEscapePressed => self.handle_escape(true),
             Message::SearchChanged(query) => {
-                self.filter.replace(query);
+                self.replace_filter_query(query);
                 Task::none()
             }
             Message::TypeToFilter(text) => self.handle_type_to_filter(&text),
@@ -932,9 +940,7 @@ impl HonkHonk {
                 Task::none()
             }
             Message::DurationsLoaded(map) => {
-                self.sounds =
-                    crate::state::library::apply_durations(std::mem::take(&mut self.sounds), &map);
-                self.durations_loaded = true;
+                self.apply_loaded_durations(&map);
                 Task::none()
             }
             Message::AssignSlot(idx, path) => {
@@ -1174,24 +1180,7 @@ impl HonkHonk {
                 Task::none()
             }
             Message::ToggleFavorite(sound_id) => {
-                let is_favorite = self.sound_meta.toggle_favorite(&sound_id);
-                if self.persist {
-                    if let Err(e) = self.sound_meta.save() {
-                        tracing::warn!(error = %e, "sound meta save error");
-                    }
-                }
-                // If the user just unstarred the last favorite while on the
-                // Favorites tab, the chip disappears from the header. Reset to
-                // "All" so the list doesn't show empty under an invisible filter.
-                if !is_favorite
-                    && self.active_category.as_deref() == Some(FAVORITES_TAB)
-                    && !self
-                        .sounds
-                        .iter()
-                        .any(|s| self.sound_meta.is_favorite(&s.id))
-                {
-                    self.active_category = None;
-                }
+                self.toggle_sound_favorite(&sound_id);
                 Task::none()
             }
             Message::OpenSoundEditor(sound_id) => {
@@ -1221,25 +1210,7 @@ impl HonkHonk {
                 Task::none()
             }
             Message::SaveSoundMeta(sound_id) => {
-                let display_name = if self.editor_draft_name.trim().is_empty() {
-                    None
-                } else {
-                    Some(self.editor_draft_name.trim().to_owned())
-                };
-                let meta = SoundMeta {
-                    volume: self.editor_draft_volume,
-                    display_name,
-                    ..self.sound_meta.get(&sound_id)
-                };
-                self.sound_meta.set(sound_id, meta);
-                if self.persist {
-                    if let Err(e) = self.sound_meta.save() {
-                        tracing::warn!(error = %e, "sound meta save error");
-                    }
-                }
-                self.editor_sound_id = None;
-                self.editor_draft_name = String::new();
-                self.editor_draft_volume = 1.0;
+                self.save_sound_metadata(sound_id);
                 Task::none()
             }
             Message::Decoded {
@@ -1487,9 +1458,9 @@ impl HonkHonk {
         let t = self.config.theme;
         let header = self.view_header(t);
         let chips = self.view_category_chips(t);
-        let filtered = self.filtered_sounds();
         let grid = sound_grid::view_grid(
-            filtered,
+            &self.sounds,
+            &self.filtered_sound_indices,
             self.playing.as_deref(),
             sound_grid::GridCtx {
                 slots: &self.slots,
@@ -3001,6 +2972,7 @@ mod tests {
                 category: "Y".into(),
             },
         ];
+        app.refresh_filtered_sounds();
         let _ = app.update(Message::ToggleFavorite("a".into()));
         // Select All tab
         let _ = app.update(Message::SelectCategory(None));
