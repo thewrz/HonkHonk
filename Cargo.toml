@@ -12,7 +12,7 @@ cognitive_complexity = "warn"
 too_many_lines = "warn"
 
 [dependencies]
-iced = { version = "0.14", features = ["tokio", "tiny-skia", "canvas"] }
+iced = { version = "0.14", features = ["tokio", "tiny-skia", "canvas", "advanced"] }
 # Pure-Rust StatusNotifierItem tray over zbus. Replaces tray-icon/muda/gtk so
 # the Linux tray no longer pulls GTK3, libappindicator, or libxdo.
 ksni = { version = "0.3.5", features = ["blocking"] }

@@ -33,6 +33,7 @@ pub(crate) mod notices;
 mod panels;
 mod playback;
 mod recording;
+mod settings;
 
 /// Virtual category name used for the Favorites filtered tab.
 pub const FAVORITES_TAB: &str = "\u{2605} Favorites";
@@ -45,15 +46,7 @@ pub enum ViewMode {
     Settings,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum SettingsSection {
-    #[default]
-    Audio,
-    Library,
-    Hotkeys,
-    Appearance,
-    About,
-}
+pub use crate::settings::SettingCategory as SettingsSection;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
@@ -123,6 +116,13 @@ pub enum Message {
     // Settings navigation
     ShowSettings,
     ShowSettingsSection(SettingsSection),
+    SettingsSearchChanged(String),
+    SettingsScrolled(scrollable::AbsoluteOffset),
+    SettingInteracted {
+        id: crate::settings::SettingId,
+        action: Box<Message>,
+    },
+    SettingsRowLocated(f32),
     // Library management
     RescanLibrary,
     AddSoundDirectory,
@@ -218,7 +218,7 @@ pub struct HonkHonk {
     duration_scan_pairs: std::sync::Arc<Vec<(String, std::path::PathBuf)>>,
     view_mode: ViewMode,
     selected_slot: Option<u8>,
-    pub(crate) settings_section: SettingsSection,
+    pub(crate) settings_ui: crate::settings::search::SettingsUiState,
     pub monitor_devices: Vec<(String, String)>,
     pub input_devices: Vec<(String, String)>,
     shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService,
@@ -439,7 +439,7 @@ impl HonkHonk {
             duration_scan_pairs,
             view_mode: ViewMode::default(),
             selected_slot: None,
-            settings_section: SettingsSection::default(),
+            settings_ui: crate::settings::search::SettingsUiState::default(),
             monitor_devices: Vec::new(),
             input_devices: Vec::new(),
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
@@ -500,7 +500,7 @@ impl HonkHonk {
             duration_scan_pairs: std::sync::Arc::new(Vec::new()),
             view_mode: ViewMode::default(),
             selected_slot: None,
-            settings_section: SettingsSection::default(),
+            settings_ui: crate::settings::search::SettingsUiState::default(),
             monitor_devices: Vec::new(),
             input_devices: Vec::new(),
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
@@ -957,15 +957,14 @@ impl HonkHonk {
                 self.selected_slot = None;
                 Task::none()
             }
-            Message::ShowSettings => {
-                self.view_mode = ViewMode::Settings;
-                self.settings_section = SettingsSection::Audio;
-                Task::none()
+            Message::ShowSettings => self.show_settings(),
+            Message::ShowSettingsSection(section) => self.show_settings_section(section),
+            Message::SettingsSearchChanged(query) => self.change_settings_search(query),
+            Message::SettingsScrolled(offset) => self.record_settings_scroll(offset),
+            Message::SettingInteracted { id, action } => {
+                self.handle_setting_interaction(id, *action)
             }
-            Message::ShowSettingsSection(section) => {
-                self.settings_section = section;
-                Task::none()
-            }
+            Message::SettingsRowLocated(offset) => self.restore_settings_row(offset),
             Message::SelectSlot(idx) => {
                 self.selected_slot = Some(idx);
                 Task::none()
@@ -2521,14 +2520,14 @@ mod tests {
     fn show_settings_defaults_section_to_audio() {
         let mut app = HonkHonk::new_for_test();
         let _ = app.update(Message::ShowSettings);
-        assert!(matches!(app.settings_section, SettingsSection::Audio));
+        assert_eq!(app.settings_ui.section(), SettingsSection::Audio);
     }
 
     #[test]
     fn show_settings_section_updates_active_section() {
         let mut app = HonkHonk::new_for_test();
         let _ = app.update(Message::ShowSettingsSection(SettingsSection::Library));
-        assert!(matches!(app.settings_section, SettingsSection::Library));
+        assert_eq!(app.settings_ui.section(), SettingsSection::Library);
     }
 
     #[test]

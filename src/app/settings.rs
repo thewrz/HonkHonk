@@ -1,0 +1,104 @@
+use iced::Task;
+use iced::widget::scrollable::AbsoluteOffset;
+
+use super::{HonkHonk, Message, SettingsSection, ViewMode};
+use crate::settings::SettingId;
+use crate::settings::search::{RestoreTarget, ScrollOffset};
+
+impl HonkHonk {
+    pub(super) fn show_settings(&mut self) -> Task<Message> {
+        self.view_mode = ViewMode::Settings;
+        self.settings_ui.open();
+        Task::none()
+    }
+
+    pub(super) fn show_settings_section(&mut self, section: SettingsSection) -> Task<Message> {
+        self.settings_ui.select_section(section);
+        Task::none()
+    }
+
+    pub(super) fn change_settings_search(&mut self, query: String) -> Task<Message> {
+        match self.settings_ui.replace_query(query) {
+            Some(RestoreTarget::Setting { id, .. }) => crate::ui::settings::locate_setting_row(id),
+            Some(RestoreTarget::Offset { offset, .. }) => scroll_to(offset),
+            None => Task::none(),
+        }
+    }
+
+    pub(super) fn record_settings_scroll(&mut self, offset: AbsoluteOffset) -> Task<Message> {
+        self.settings_ui.record_scroll(offset.x, offset.y);
+        Task::none()
+    }
+
+    pub(super) fn handle_setting_interaction(
+        &mut self,
+        id: SettingId,
+        action: Message,
+    ) -> Task<Message> {
+        self.settings_ui.record_interaction(id);
+        self.update(action)
+    }
+
+    pub(super) fn restore_settings_row(&mut self, y: f32) -> Task<Message> {
+        scroll_to(ScrollOffset { x: 0.0, y })
+    }
+}
+
+fn scroll_to(offset: ScrollOffset) -> Task<Message> {
+    iced::widget::operation::scroll_to(
+        crate::ui::settings::content_scroll_id(),
+        AbsoluteOffset {
+            x: offset.x,
+            y: offset.y,
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::SettingCategory;
+
+    #[test]
+    fn opening_settings_resets_transient_search_state() {
+        let mut app = HonkHonk::new_for_test();
+        app.settings_ui.replace_query("temporary search".to_owned());
+
+        let _ = app.show_settings();
+
+        assert_eq!(app.settings_ui.query(), "");
+        assert_eq!(app.settings_ui.section(), SettingCategory::Audio);
+        assert_eq!(app.view_mode, ViewMode::Settings);
+    }
+
+    #[test]
+    fn selecting_a_section_does_not_change_the_query() {
+        let mut app = HonkHonk::new_for_test();
+        app.settings_ui.replace_query("theme".to_owned());
+
+        let _ = app.show_settings_section(SettingCategory::Appearance);
+
+        assert_eq!(app.settings_ui.query(), "theme");
+        assert_eq!(app.settings_ui.section(), SettingCategory::Appearance);
+    }
+
+    #[test]
+    fn tracked_action_updates_state_and_runs_original_message() {
+        let mut app = HonkHonk::new_for_test();
+        app.settings_ui.replace_query("theme".to_owned());
+
+        let _ = app.handle_setting_interaction(
+            SettingId::Theme,
+            Message::ThemeChanged(crate::ui::theme::Theme::Light),
+        );
+
+        assert_eq!(app.config.theme, crate::ui::theme::Theme::Light);
+        assert_eq!(
+            app.settings_ui.replace_query(String::new()),
+            Some(RestoreTarget::Setting {
+                id: SettingId::Theme,
+                category: SettingCategory::Appearance,
+            })
+        );
+    }
+}

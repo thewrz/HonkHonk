@@ -4,6 +4,7 @@ use iced::{Alignment, Border, Element, Length, Padding};
 use crate::ui::theme::{self, Hh, Theme};
 
 const INPUT_ID: &str = "honkhonk-shared-filter";
+const SETTINGS_INPUT_ID: &str = "honkhonk-settings-filter";
 
 /// Returns the stable widget identifier used for programmatic filter focus.
 pub fn input_id() -> iced::widget::Id {
@@ -22,9 +23,59 @@ pub fn view_search_bar<'a, Message>(
 where
     Message: Clone + 'a,
 {
-    let t = Theme::Dark;
-    let clear_message = on_input(String::new());
+    view_search_input(
+        "Find a sound to honk\u{2026}",
+        query,
+        input_id(),
+        Length::Fixed(300.0),
+        on_input,
+    )
+}
 
+/// Builds the click-only settings search using the same stable input stack.
+pub fn view_settings_search_bar<'a, Message>(
+    query: &'a str,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    view_search_input(
+        "Search settings\u{2026}",
+        query,
+        iced::widget::Id::new(SETTINGS_INPUT_ID),
+        Length::Fill,
+        on_input,
+    )
+}
+
+fn view_search_input<'a, Message>(
+    placeholder: &'a str,
+    query: &'a str,
+    id: iced::widget::Id,
+    width: Length,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    let clear_message = on_input(String::new());
+    let input = search_input(placeholder, query, id, width, on_input);
+    let overlay = clear_overlay(query, clear_message, width);
+    iced::widget::stack![input, overlay].into()
+}
+
+fn search_input<'a, Message>(
+    placeholder: &'a str,
+    query: &'a str,
+    id: iced::widget::Id,
+    width: Length,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    let t = Theme::Dark;
     // Reserve right space for the clear button so typed text doesn't run under it.
     let padding = if query.is_empty() {
         Padding::from(5.0)
@@ -37,11 +88,11 @@ where
         }
     };
 
-    let input: Element<'_, Message> = text_input("Find a sound to honk\u{2026}", query)
-        .id(input_id())
+    text_input(placeholder, query)
+        .id(id)
         .on_input(on_input)
         .size(theme::font::BODY)
-        .width(Length::Fixed(300.0))
+        .width(width)
         .padding(padding)
         .style(move |_theme, status| {
             let border_color = match status {
@@ -61,12 +112,22 @@ where
                 selection: t.accent(),
             }
         })
-        .into();
+        .into()
+}
 
+fn clear_overlay<'a, Message>(
+    query: &str,
+    clear_message: Message,
+    width: Length,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    let t = Theme::Dark;
     // Always use stack so the widget tree shape is stable across all query states.
     // Changing from container → stack on first keystroke caused Iced to reset
     // text_input focus. An empty row as the second layer has no hit area or cost.
-    let overlay: Element<'_, Message> = if query.is_empty() {
+    if query.is_empty() {
         row![].into()
     } else {
         // Clear button — floats over the right edge of the input via stack.
@@ -88,11 +149,9 @@ where
             });
 
         container(clear_btn)
-            .width(Length::Fixed(300.0))
+            .width(width)
             .align_x(Alignment::End)
             .align_y(Alignment::Center)
             .into()
-    };
-
-    iced::widget::stack![input, overlay].into()
+    }
 }
