@@ -47,7 +47,10 @@ fn channel_peaks(samples: &[f32]) -> [f32; 2] {
 }
 
 fn has_live_block(samples: &[f32], sample_rate: u32, lane: usize) -> bool {
-    let frames_per_block = (sample_rate as usize / 20).max(1);
+    let frames_per_block = sample_rate as usize / 20;
+    if frames_per_block == 0 {
+        return false;
+    }
     let frame_count = samples.len() / 2;
     let window_frames = frames_per_block.min(frame_count);
     let mut energy = window_energy(samples, lane, 0, window_frames);
@@ -259,6 +262,16 @@ mod tests {
             samples,
             constant_stereo(4, LIVE_CHANNEL_RMS, LIVE_CHANNEL_RMS)
         );
+    }
+
+    #[test]
+    fn sub_twenty_hertz_clip_has_no_valid_fifty_millisecond_window() {
+        let mut samples = constant_stereo(1, 0.0, 0.25);
+        let original = samples.clone();
+
+        assert!(!has_live_block(&samples, 19, 1));
+        assert!(!repair_dead_stereo_channel(&mut samples, 19, 2));
+        assert_eq!(samples, original);
     }
 
     #[test]
