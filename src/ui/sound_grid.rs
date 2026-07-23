@@ -101,7 +101,7 @@ fn view_grid_columns<'a>(
                 })
                 .collect();
 
-            tiles.extend((0..missing_tile_slots(chunk.len(), columns)).map(|_| {
+            tiles.extend((0..missing_tile_slots(tiles.len(), columns)).map(|_| {
                 Space::new()
                     .width(Length::Fill)
                     .height(tile_layout::tile_slot_height())
@@ -302,6 +302,18 @@ pub fn context_menu_overlay<'a>(
 mod tests {
     use super::*;
 
+    fn test_sound() -> SoundEntry {
+        SoundEntry {
+            id: "sound".into(),
+            name: "Sound".into(),
+            path: "/sounds/sound.wav".into(),
+            format: crate::state::AudioFormat::Wav,
+            duration_ms: None,
+            modified_ms: None,
+            category: "Test".into(),
+        }
+    }
+
     #[test]
     fn incomplete_rows_reserve_all_missing_tile_slots() {
         // Iced view rendering is intentionally not unit-tested here; this pins
@@ -311,5 +323,31 @@ mod tests {
         assert_eq!(missing_tile_slots(2, 5), 3);
         assert_eq!(missing_tile_slots(5, 5), 0);
         assert_eq!(missing_tile_slots(6, 5), 0);
+    }
+
+    #[test]
+    fn unresolved_indices_are_replaced_with_filler_slots() {
+        let sounds = [test_sound()];
+        let visible_indices = [0, 99];
+        let slots = SlotMap::default();
+        let triggers = std::array::from_fn(|_| None);
+        let sound_meta = SoundMetaStore::default();
+        let element = view_grid_columns(
+            &sounds,
+            &visible_indices,
+            None,
+            GridCtx {
+                slots: &slots,
+                triggers: &triggers,
+                shortcuts_active: false,
+                columns: 2,
+                sound_meta: &sound_meta,
+            },
+            2,
+        );
+        let tree = iced_core::widget::Tree::new(element.as_widget());
+
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].children.len(), 2);
     }
 }

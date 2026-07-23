@@ -17,19 +17,7 @@ impl AppConfig {
 
     /// Loads config from disk, creating defaults if the file is missing.
     pub fn load() -> Result<Self, ConfigError> {
-        let path = Self::config_path()?;
-
-        if !path.exists() {
-            let config = Self::default();
-            config.save()?;
-            return Ok(config);
-        }
-
-        let contents = read_config(&path)?;
-        serde_json::from_str(&contents).map_err(|source| ConfigError::Deserialize {
-            path: path.display().to_string(),
-            source,
-        })
+        Self::load_from(&Self::config_path()?)
     }
 
     /// Persists config to disk, creating parent directories as needed.
