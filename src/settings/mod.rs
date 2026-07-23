@@ -60,6 +60,7 @@ pub enum SettingValue {
     None,
 }
 
+#[derive(Debug)]
 pub struct SettingDef {
     pub id: SettingId,
     pub category: SettingCategory,

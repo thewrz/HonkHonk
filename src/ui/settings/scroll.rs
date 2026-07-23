@@ -30,6 +30,7 @@ fn setting_key(setting: SettingId) -> &'static str {
         SettingId::MicPassthrough => "honkhonk-setting-mic-passthrough",
         SettingId::MicPassthroughLevel => "honkhonk-setting-mic-passthrough-level",
         SettingId::OverlapMode => "honkhonk-setting-overlap-mode",
+        // This bespoke, non-registry row is not searchable, but keeps a stable ID for future reuse.
         SettingId::MonitorDevice => "honkhonk-setting-monitor-device",
         SettingId::Renderer => "honkhonk-setting-renderer",
     }

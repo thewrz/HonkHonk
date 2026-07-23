@@ -11,14 +11,19 @@ use iced::{
 };
 
 use crate::app::{HonkHonk, Message, SettingsSection};
-use crate::settings::search::{
-    SearchMatchScope, matching_categories, matching_settings, search_match_scope,
-};
 use crate::ui::theme::{self, Hh, Theme};
 use crate::ui::{search_bar, settings::common::section_layout};
 
 pub use controls::{get_setting_value, setting_message};
 pub(crate) use scroll::{content_scroll_id, locate_setting_row};
+
+const SETTINGS_SECTIONS: &[SettingsSection] = &[
+    SettingsSection::Audio,
+    SettingsSection::Library,
+    SettingsSection::Hotkeys,
+    SettingsSection::Appearance,
+    SettingsSection::About,
+];
 
 /// Top-level settings view — full window swap.
 pub fn view_settings(state: &HonkHonk, t: Theme) -> Element<'_, Message> {
@@ -87,7 +92,8 @@ fn settings_header(t: Theme) -> Element<'static, Message> {
 fn settings_sidebar(state: &HonkHonk, t: Theme) -> Element<'_, Message> {
     let active = state.settings_ui.section();
     let nav = sidebar_categories(state)
-        .into_iter()
+        .iter()
+        .copied()
         .fold(column![].spacing(theme::space::XS), |column, section| {
             column.push(sidebar_button(section, active, t))
         });
@@ -117,17 +123,11 @@ fn settings_sidebar(state: &HonkHonk, t: Theme) -> Element<'_, Message> {
     .into()
 }
 
-fn sidebar_categories(state: &HonkHonk) -> Vec<SettingsSection> {
+fn sidebar_categories(state: &HonkHonk) -> &[SettingsSection] {
     if state.settings_ui.is_searching() {
-        matching_categories(state.settings_ui.query())
+        state.settings_ui.matching_categories()
     } else {
-        vec![
-            SettingsSection::Audio,
-            SettingsSection::Library,
-            SettingsSection::Hotkeys,
-            SettingsSection::Appearance,
-            SettingsSection::About,
-        ]
+        SETTINGS_SECTIONS
     }
 }
 
@@ -187,14 +187,13 @@ fn settings_content<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
 
 fn search_results<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
     let category = state.settings_ui.section();
-    let rows = matching_settings(state.settings_ui.query(), category);
+    let rows = state.settings_ui.matching_settings();
 
     if rows.is_empty() {
-        let message = match search_match_scope(state.settings_ui.query(), category) {
-            SearchMatchScope::None => "No settings match your search.",
-            SearchMatchScope::OtherCategory | SearchMatchScope::SelectedCategory => {
-                "Choose a matching category from the sidebar."
-            }
+        let message = if state.settings_ui.matching_categories().is_empty() {
+            "No settings match your search."
+        } else {
+            "Choose a matching category from the sidebar."
         };
         return text(message)
             .size(theme::font::BODY)
@@ -203,7 +202,8 @@ fn search_results<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
     }
 
     let body = rows
-        .into_iter()
+        .iter()
+        .copied()
         .fold(column![].spacing(theme::space::XS), |column, setting| {
             column.push(controls::render_setting_row(setting, state, t, true))
         });
