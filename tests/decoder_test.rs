@@ -39,6 +39,28 @@ fn audio_error_missing_codec_params_displays() {
 use honkhonk::audio::decode;
 use std::path::Path;
 
+fn write_stereo_pcm16_wav(path: &Path, frames: &[[i16; 2]], sample_rate: u32) {
+    let data_len = u32::try_from(frames.len() * 4).expect("test WAV fits u32");
+    let mut bytes = Vec::with_capacity(44 + data_len as usize);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data_len).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes());
+    bytes.extend_from_slice(&2_u16.to_le_bytes());
+    bytes.extend_from_slice(&sample_rate.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate * 4).to_le_bytes());
+    bytes.extend_from_slice(&4_u16.to_le_bytes());
+    bytes.extend_from_slice(&16_u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data_len.to_le_bytes());
+    for frame in frames {
+        bytes.extend_from_slice(&frame[0].to_le_bytes());
+        bytes.extend_from_slice(&frame[1].to_le_bytes());
+    }
+    std::fs::write(path, bytes).expect("write test WAV");
+}
+
 #[test]
 fn decode_mono_wav_returns_correct_metadata() {
     let path = Path::new("tests/fixtures/sine_mono.wav");
@@ -162,6 +184,33 @@ fn decode_stereo_wav_duration_matches_mono() {
         "mono ({:.3}s) and stereo ({:.3}s) durations should match",
         mono.duration.as_secs_f64(),
         stereo.duration.as_secs_f64()
+    );
+}
+
+#[test]
+fn decode_repairs_dead_stereo_lane_before_returning_pcm() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("dead-left.wav");
+    let input_frames = vec![[0_i16, 8_192_i16]; 2_400];
+    write_stereo_pcm16_wav(&path, &input_frames, 48_000);
+
+    let audio = decode(&path).expect("decode dead-left WAV");
+
+    assert_eq!(audio.sample_rate, 48_000);
+    assert_eq!(audio.channels, 2);
+    assert_eq!(audio.samples.len(), input_frames.len() * 2);
+    assert_eq!(audio.duration, std::time::Duration::from_millis(50));
+    for frame in audio.samples.chunks_exact(2) {
+        assert_eq!(
+            frame[0].to_bits(),
+            frame[1].to_bits(),
+            "repair must copy the right sample without changing its amplitude"
+        );
+    }
+    let peak = audio.samples.iter().copied().fold(0.0_f32, f32::max);
+    assert!(
+        (peak - 0.25).abs() <= f32::EPSILON,
+        "expected original 0.25 amplitude, got {peak}"
     );
 }
 
