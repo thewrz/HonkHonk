@@ -9,5 +9,5 @@ pub use config::{AppConfig, Density, OverlapMode, Renderer, SortPref};
 pub use error::ConfigError;
 pub use library::{AudioFormat, Library, LibraryScan, SoundEntry};
 pub use macros::{Macro, MacroStore, Step};
-pub use slots::SlotMap;
+pub use slots::{MacroIdError, SlotContent, SlotMap};
 pub use sound_meta::{GraphicAssetRef, GraphicRefError, SoundMeta, SoundMetaStore};
