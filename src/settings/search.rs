@@ -14,14 +14,43 @@ pub struct ScrollOffset {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RestoreTarget {
-    Setting {
-        id: SettingId,
-        category: SettingCategory,
-    },
+    Setting(RowRestoreRequest),
     Offset {
         category: SettingCategory,
         offset: ScrollOffset,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowRestoreRequest {
+    setting: SettingId,
+    category: SettingCategory,
+    generation: u64,
+}
+
+impl RowRestoreRequest {
+    const fn new(setting: SettingId, category: SettingCategory, generation: u64) -> Self {
+        Self {
+            setting,
+            category,
+            generation,
+        }
+    }
+
+    pub const fn setting(self) -> SettingId {
+        self.setting
+    }
+
+    pub const fn category(self) -> SettingCategory {
+        self.category
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchMatchScope {
+    SelectedCategory,
+    OtherCategory,
+    None,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -31,6 +60,8 @@ pub struct SettingsSearchState {
     restore_section: SettingCategory,
     restore_offset: ScrollOffset,
     last_interacted: Option<(SettingId, SettingCategory)>,
+    restore_generation: u64,
+    pending_row_restore: Option<RowRestoreRequest>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -60,6 +91,17 @@ pub fn matching_categories(query: &str) -> Vec<SettingCategory> {
         .collect()
 }
 
+pub fn search_match_scope(query: &str, selected: SettingCategory) -> SearchMatchScope {
+    let categories = matching_categories(query);
+    if categories.contains(&selected) {
+        SearchMatchScope::SelectedCategory
+    } else if categories.is_empty() {
+        SearchMatchScope::None
+    } else {
+        SearchMatchScope::OtherCategory
+    }
+}
+
 fn normalized_query(query: &str) -> String {
     query.trim().to_lowercase()
 }
@@ -80,7 +122,9 @@ fn category_for_setting(id: SettingId) -> Option<SettingCategory> {
 
 impl SettingsUiState {
     pub fn open(&mut self) {
+        let generation = self.search.restore_generation.wrapping_add(1);
         *self = Self::default();
+        self.search.restore_generation = generation;
     }
 
     pub fn section(&self) -> SettingCategory {
@@ -96,6 +140,7 @@ impl SettingsUiState {
     }
 
     pub fn select_section(&mut self, section: SettingCategory) {
+        self.invalidate_row_restore();
         self.section = section;
     }
 
@@ -114,6 +159,7 @@ impl SettingsUiState {
     pub fn replace_query(&mut self, query: String) -> Option<RestoreTarget> {
         let was_searching = self.is_searching();
         let will_search = !normalized_query(&query).is_empty();
+        self.invalidate_row_restore();
 
         if !was_searching && will_search {
             self.search.restore_section = self.section;
@@ -131,18 +177,39 @@ impl SettingsUiState {
 
     fn finish_search(&mut self) -> RestoreTarget {
         let target = match self.search.last_interacted.take() {
-            Some((id, category)) => RestoreTarget::Setting { id, category },
+            Some((setting, category)) => RestoreTarget::Setting(RowRestoreRequest::new(
+                setting,
+                category,
+                self.search.restore_generation,
+            )),
             None => RestoreTarget::Offset {
                 category: self.search.restore_section,
                 offset: self.search.restore_offset,
             },
         };
         self.section = match target {
-            RestoreTarget::Setting { category, .. } | RestoreTarget::Offset { category, .. } => {
-                category
-            }
+            RestoreTarget::Setting(request) => request.category(),
+            RestoreTarget::Offset { category, .. } => category,
         };
+        if let RestoreTarget::Setting(request) = target {
+            self.search.pending_row_restore = Some(request);
+        }
         target
+    }
+
+    pub fn accept_row_restore(&mut self, request: RowRestoreRequest) -> bool {
+        let is_current = self.search.pending_row_restore == Some(request)
+            && self.section == request.category()
+            && !self.is_searching();
+        if is_current {
+            self.search.pending_row_restore = None;
+        }
+        is_current
+    }
+
+    fn invalidate_row_restore(&mut self) {
+        self.search.restore_generation = self.search.restore_generation.wrapping_add(1);
+        self.search.pending_row_restore = None;
     }
 }
 
@@ -194,6 +261,22 @@ mod tests {
     }
 
     #[test]
+    fn search_scope_distinguishes_selected_other_and_global_matches() {
+        assert_eq!(
+            search_match_scope("theme", SettingCategory::Appearance),
+            SearchMatchScope::SelectedCategory
+        );
+        assert_eq!(
+            search_match_scope("theme", SettingCategory::Audio),
+            SearchMatchScope::OtherCategory
+        );
+        assert_eq!(
+            search_match_scope("definitely absent", SettingCategory::Audio),
+            SearchMatchScope::None
+        );
+    }
+
+    #[test]
     fn typing_does_not_switch_sections_and_snapshots_offset_once() {
         let mut state = SettingsUiState::default();
         state.select_section(SettingCategory::Library);
@@ -224,14 +307,53 @@ mod tests {
         state.record_interaction(SettingId::OverlapMode);
         state.select_section(SettingCategory::Appearance);
 
-        assert_eq!(
+        assert!(matches!(
             state.replace_query(String::new()),
-            Some(RestoreTarget::Setting {
-                id: SettingId::OverlapMode,
-                category: SettingCategory::Audio,
-            })
-        );
+            Some(RestoreTarget::Setting(request))
+                if request.setting() == SettingId::OverlapMode
+                    && request.category() == SettingCategory::Audio
+        ));
         assert_eq!(state.section(), SettingCategory::Audio);
+    }
+
+    #[test]
+    fn query_and_section_changes_reject_stale_row_restore_requests() {
+        let mut state = SettingsUiState::default();
+        state.replace_query("mode".into());
+        state.record_interaction(SettingId::OverlapMode);
+        let Some(RestoreTarget::Setting(query_stale)) = state.replace_query(String::new()) else {
+            panic!("clearing an interacted search should request row restoration");
+        };
+
+        state.replace_query("theme".into());
+        assert!(!state.accept_row_restore(query_stale));
+
+        state.record_interaction(SettingId::Theme);
+        let Some(RestoreTarget::Setting(section_stale)) = state.replace_query(String::new()) else {
+            panic!("clearing the second search should request row restoration");
+        };
+        state.select_section(SettingCategory::Audio);
+        assert!(!state.accept_row_restore(section_stale));
+    }
+
+    #[test]
+    fn restore_generation_rejects_an_older_request_for_the_same_row() {
+        let mut state = SettingsUiState::default();
+        state.replace_query("mode".into());
+        state.record_interaction(SettingId::OverlapMode);
+        let Some(RestoreTarget::Setting(first)) = state.replace_query(String::new()) else {
+            panic!("first search should request row restoration");
+        };
+
+        state.replace_query("mode".into());
+        state.record_interaction(SettingId::OverlapMode);
+        let Some(RestoreTarget::Setting(second)) = state.replace_query(String::new()) else {
+            panic!("second search should request row restoration");
+        };
+
+        assert_ne!(first, second);
+        assert!(!state.accept_row_restore(first));
+        assert!(state.accept_row_restore(second));
     }
 
     #[test]

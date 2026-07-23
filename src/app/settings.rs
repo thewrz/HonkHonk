@@ -3,7 +3,7 @@ use iced::widget::scrollable::AbsoluteOffset;
 
 use super::{HonkHonk, Message, SettingsSection, ViewMode};
 use crate::settings::SettingId;
-use crate::settings::search::{RestoreTarget, ScrollOffset};
+use crate::settings::search::{RestoreTarget, RowRestoreRequest, ScrollOffset};
 
 impl HonkHonk {
     pub(super) fn show_settings(&mut self) -> Task<Message> {
@@ -19,7 +19,9 @@ impl HonkHonk {
 
     pub(super) fn change_settings_search(&mut self, query: String) -> Task<Message> {
         match self.settings_ui.replace_query(query) {
-            Some(RestoreTarget::Setting { id, .. }) => crate::ui::settings::locate_setting_row(id),
+            Some(RestoreTarget::Setting(request)) => {
+                crate::ui::settings::locate_setting_row(request)
+            }
             Some(RestoreTarget::Offset { offset, .. }) => scroll_to(offset),
             None => Task::none(),
         }
@@ -39,8 +41,16 @@ impl HonkHonk {
         self.update(action)
     }
 
-    pub(super) fn restore_settings_row(&mut self, y: f32) -> Task<Message> {
-        scroll_to(ScrollOffset { x: 0.0, y })
+    pub(super) fn restore_settings_row(
+        &mut self,
+        request: RowRestoreRequest,
+        y: f32,
+    ) -> Task<Message> {
+        if self.settings_ui.accept_row_restore(request) {
+            scroll_to(ScrollOffset { x: 0.0, y })
+        } else {
+            Task::none()
+        }
     }
 }
 
@@ -93,12 +103,27 @@ mod tests {
         );
 
         assert_eq!(app.config.theme, crate::ui::theme::Theme::Light);
-        assert_eq!(
+        assert!(matches!(
             app.settings_ui.replace_query(String::new()),
-            Some(RestoreTarget::Setting {
-                id: SettingId::Theme,
-                category: SettingCategory::Appearance,
-            })
-        );
+            Some(RestoreTarget::Setting(request))
+                if request.setting() == SettingId::Theme
+                    && request.category() == SettingCategory::Appearance
+        ));
+    }
+
+    #[test]
+    fn stale_row_location_is_ignored_after_section_change() {
+        let mut app = HonkHonk::new_for_test();
+        app.settings_ui.replace_query("mode".to_owned());
+        app.settings_ui.record_interaction(SettingId::OverlapMode);
+        let Some(RestoreTarget::Setting(request)) = app.settings_ui.replace_query(String::new())
+        else {
+            panic!("clearing an interacted search should request row restoration");
+        };
+
+        let _ = app.show_settings_section(SettingCategory::Appearance);
+        let task = app.restore_settings_row(request, 240.0);
+
+        assert_eq!(task.units(), 0);
     }
 }

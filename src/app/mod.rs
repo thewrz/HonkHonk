@@ -122,7 +122,10 @@ pub enum Message {
         id: crate::settings::SettingId,
         action: Box<Message>,
     },
-    SettingsRowLocated(f32),
+    SettingsRowLocated {
+        request: crate::settings::search::RowRestoreRequest,
+        offset: f32,
+    },
     // Library management
     RescanLibrary,
     AddSoundDirectory,
@@ -964,7 +967,9 @@ impl HonkHonk {
             Message::SettingInteracted { id, action } => {
                 self.handle_setting_interaction(id, *action)
             }
-            Message::SettingsRowLocated(offset) => self.restore_settings_row(offset),
+            Message::SettingsRowLocated { request, offset } => {
+                self.restore_settings_row(request, offset)
+            }
             Message::SelectSlot(idx) => {
                 self.selected_slot = Some(idx);
                 Task::none()

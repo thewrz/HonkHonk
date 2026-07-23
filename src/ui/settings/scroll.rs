@@ -4,6 +4,7 @@ use iced::{Rectangle, Task, Vector};
 
 use crate::app::Message;
 use crate::settings::SettingId;
+use crate::settings::search::RowRestoreRequest;
 
 const CONTENT_ID: &str = "honkhonk-settings-content";
 
@@ -15,8 +16,9 @@ pub(super) fn row_id(setting: SettingId) -> Id {
     Id::new(setting_key(setting))
 }
 
-pub(crate) fn locate_setting_row(setting: SettingId) -> Task<Message> {
-    iced::advanced::widget::operate(FindRowOffset::new(setting)).map(Message::SettingsRowLocated)
+pub(crate) fn locate_setting_row(request: RowRestoreRequest) -> Task<Message> {
+    iced::advanced::widget::operate(FindRowOffset::new(request.setting()))
+        .map(move |offset| Message::SettingsRowLocated { request, offset })
 }
 
 fn setting_key(setting: SettingId) -> &'static str {

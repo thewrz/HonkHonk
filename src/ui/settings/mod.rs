@@ -11,7 +11,9 @@ use iced::{
 };
 
 use crate::app::{HonkHonk, Message, SettingsSection};
-use crate::settings::search::{matching_categories, matching_settings};
+use crate::settings::search::{
+    SearchMatchScope, matching_categories, matching_settings, search_match_scope,
+};
 use crate::ui::theme::{self, Hh, Theme};
 use crate::ui::{search_bar, settings::common::section_layout};
 
@@ -92,6 +94,7 @@ fn settings_sidebar(state: &HonkHonk, t: Theme) -> Element<'_, Message> {
 
     let search = search_bar::view_settings_search_bar(
         state.settings_ui.query(),
+        t,
         Message::SettingsSearchChanged,
     );
 
@@ -187,7 +190,13 @@ fn search_results<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
     let rows = matching_settings(state.settings_ui.query(), category);
 
     if rows.is_empty() {
-        return text("Choose a matching category from the sidebar.")
+        let message = match search_match_scope(state.settings_ui.query(), category) {
+            SearchMatchScope::None => "No settings match your search.",
+            SearchMatchScope::OtherCategory | SearchMatchScope::SelectedCategory => {
+                "Choose a matching category from the sidebar."
+            }
+        };
+        return text(message)
             .size(theme::font::BODY)
             .color(t.ink_dim())
             .into();

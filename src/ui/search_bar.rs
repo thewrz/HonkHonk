@@ -6,6 +6,14 @@ use crate::ui::theme::{self, Hh, Theme};
 const INPUT_ID: &str = "honkhonk-shared-filter";
 const SETTINGS_INPUT_ID: &str = "honkhonk-settings-filter";
 
+#[derive(Clone)]
+struct SearchInputConfig<'a> {
+    placeholder: &'a str,
+    id: iced::widget::Id,
+    width: Length,
+    theme: Theme,
+}
+
 /// Returns the stable widget identifier used for programmatic filter focus.
 pub fn input_id() -> iced::widget::Id {
     iced::widget::Id::new(INPUT_ID)
@@ -24,10 +32,13 @@ where
     Message: Clone + 'a,
 {
     view_search_input(
-        "Find a sound to honk\u{2026}",
         query,
-        input_id(),
-        Length::Fixed(300.0),
+        SearchInputConfig {
+            placeholder: "Find a sound to honk\u{2026}",
+            id: input_id(),
+            width: Length::Fixed(300.0),
+            theme: Theme::Dark,
+        },
         on_input,
     )
 }
@@ -35,47 +46,47 @@ where
 /// Builds the click-only settings search using the same stable input stack.
 pub fn view_settings_search_bar<'a, Message>(
     query: &'a str,
+    t: Theme,
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
     view_search_input(
-        "Search settings\u{2026}",
         query,
-        iced::widget::Id::new(SETTINGS_INPUT_ID),
-        Length::Fill,
+        SearchInputConfig {
+            placeholder: "Search settings\u{2026}",
+            id: iced::widget::Id::new(SETTINGS_INPUT_ID),
+            width: Length::Fill,
+            theme: t,
+        },
         on_input,
     )
 }
 
 fn view_search_input<'a, Message>(
-    placeholder: &'a str,
     query: &'a str,
-    id: iced::widget::Id,
-    width: Length,
+    config: SearchInputConfig<'a>,
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
     let clear_message = on_input(String::new());
-    let input = search_input(placeholder, query, id, width, on_input);
-    let overlay = clear_overlay(query, clear_message, width);
+    let input = search_input(query, config.clone(), on_input);
+    let overlay = clear_overlay(query, clear_message, config.width, config.theme);
     iced::widget::stack![input, overlay].into()
 }
 
 fn search_input<'a, Message>(
-    placeholder: &'a str,
     query: &'a str,
-    id: iced::widget::Id,
-    width: Length,
+    config: SearchInputConfig<'a>,
     on_input: impl Fn(String) -> Message + 'a,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
-    let t = Theme::Dark;
+    let t = config.theme;
     // Reserve right space for the clear button so typed text doesn't run under it.
     let padding = if query.is_empty() {
         Padding::from(5.0)
@@ -88,11 +99,11 @@ where
         }
     };
 
-    text_input(placeholder, query)
-        .id(id)
+    text_input(config.placeholder, query)
+        .id(config.id)
         .on_input(on_input)
         .size(theme::font::BODY)
-        .width(width)
+        .width(config.width)
         .padding(padding)
         .style(move |_theme, status| {
             let border_color = match status {
@@ -119,11 +130,11 @@ fn clear_overlay<'a, Message>(
     query: &str,
     clear_message: Message,
     width: Length,
+    t: Theme,
 ) -> Element<'a, Message>
 where
     Message: Clone + 'a,
 {
-    let t = Theme::Dark;
     // Always use stack so the widget tree shape is stable across all query states.
     // Changing from container → stack on first keystroke caused Iced to reset
     // text_input focus. An empty row as the second layer has no hit area or cost.
