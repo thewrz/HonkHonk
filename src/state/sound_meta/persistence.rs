@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::{CONFIG_DIR_NAME, META_FILE_NAME, META_FORMAT_VERSION, SoundMeta, SoundMetaStore};
+use super::{
+    CONFIG_DIR_NAME, META_FILE_NAME, META_FORMAT_VERSION, SoundMeta, SoundMetaStore, default_volume,
+};
 use crate::state::error::ConfigError;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -13,6 +15,35 @@ struct PersistedSoundMeta {
     custom: HashMap<String, SoundMeta>,
     #[serde(default)]
     added: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PersistedSoundMetaV1 {
+    #[serde(default)]
+    custom: HashMap<String, SoundMetaV1>,
+    #[serde(default)]
+    added: BTreeMap<String, u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SoundMetaV1 {
+    #[serde(default)]
+    favorite: bool,
+    #[serde(default = "default_volume")]
+    volume: f32,
+    #[serde(default)]
+    display_name: Option<String>,
+}
+
+impl From<SoundMetaV1> for SoundMeta {
+    fn from(meta: SoundMetaV1) -> Self {
+        Self {
+            favorite: meta.favorite,
+            volume: meta.volume,
+            display_name: meta.display_name,
+            assigned_graphic: None,
+        }
+    }
 }
 
 impl SoundMetaStore {
@@ -84,20 +115,43 @@ impl SoundMetaStore {
             return None;
         }
 
-        let custom = serde_json::from_value(value).ok()?;
+        let legacy: HashMap<String, SoundMetaV1> = serde_json::from_value(value).ok()?;
         Some(Self {
-            custom,
+            custom: migrate_custom(legacy),
             added: BTreeMap::new(),
             writable: true,
         })
     }
 
     fn from_versioned(value: serde_json::Value) -> Option<Self> {
-        let persisted: PersistedSoundMeta = serde_json::from_value(value).ok()?;
-        (persisted.version == META_FORMAT_VERSION).then_some(Self {
-            custom: persisted.custom,
-            added: persisted.added,
-            writable: true,
-        })
+        match value.get("version")?.as_u64()? {
+            1 => {
+                let persisted: PersistedSoundMetaV1 = serde_json::from_value(value).ok()?;
+                Some(Self::from_parts(
+                    migrate_custom(persisted.custom),
+                    persisted.added,
+                ))
+            }
+            version if version == u64::from(META_FORMAT_VERSION) => {
+                let persisted: PersistedSoundMeta = serde_json::from_value(value).ok()?;
+                Some(Self::from_parts(persisted.custom, persisted.added))
+            }
+            _ => None,
+        }
     }
+
+    fn from_parts(custom: HashMap<String, SoundMeta>, added: BTreeMap<String, u64>) -> Self {
+        Self {
+            custom,
+            added,
+            writable: true,
+        }
+    }
+}
+
+fn migrate_custom(legacy: HashMap<String, SoundMetaV1>) -> HashMap<String, SoundMeta> {
+    legacy
+        .into_iter()
+        .map(|(id, meta)| (id, meta.into()))
+        .collect()
 }

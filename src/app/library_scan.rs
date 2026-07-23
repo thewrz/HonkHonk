@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::SystemTime;
 
 use crate::state::{LibraryScan, SoundEntry, SoundMetaStore};
@@ -39,6 +40,15 @@ fn save_reconciled_meta(store: &SoundMetaStore, should_save: bool) {
 }
 
 impl HonkHonk {
+    pub(super) fn apply_loaded_durations(&mut self, durations: &HashMap<String, u64>) {
+        self.sounds =
+            crate::state::library::apply_durations(std::mem::take(&mut self.sounds), durations);
+        self.durations_loaded = true;
+        if self.sound_sort.key().uses_duration() {
+            self.refresh_filtered_sounds();
+        }
+    }
+
     pub(super) fn apply_library_scan(&mut self, scan: LibraryScan) {
         reconcile_sound_meta(
             &mut self.sound_meta,
@@ -53,6 +63,7 @@ impl HonkHonk {
                 .collect(),
         );
         self.sounds = scan.entries;
+        self.refresh_filtered_sounds();
         self.reconcile_playback_with_library();
         self.durations_loaded = false;
     }
@@ -102,6 +113,32 @@ mod tests {
 
         assert_eq!(app.sound_meta.added_ms("unseen"), Some(1));
         assert!(app.sound_meta.added_ms("current").is_some());
+    }
+
+    #[test]
+    fn applying_scan_refreshes_cached_order_for_modified_metadata() {
+        let mut app = HonkHonk::new_for_test();
+        let mut later = sound("later");
+        later.modified_ms = Some(200);
+        let mut earlier = sound("earlier");
+        earlier.modified_ms = Some(100);
+        app.apply_library_scan(LibraryScan {
+            entries: vec![later, earlier],
+            complete: true,
+        });
+        let _ = app.update(Message::SelectSoundSort("modified"));
+        assert_eq!(app.filtered_sounds()[0].id, "earlier");
+
+        let mut now_earlier = sound("later");
+        now_earlier.modified_ms = Some(50);
+        let mut now_later = sound("earlier");
+        now_later.modified_ms = Some(100);
+        app.apply_library_scan(LibraryScan {
+            entries: vec![now_later, now_earlier],
+            complete: true,
+        });
+
+        assert_eq!(app.filtered_sounds()[0].id, "later");
     }
 
     #[test]

@@ -66,11 +66,6 @@ pub fn make_sounds(n: usize) -> Vec<SoundEntry> {
         .collect()
 }
 
-/// Borrows entries into the `&[&SoundEntry]` slice `view_grid` expects.
-pub fn sound_refs(sounds: &[SoundEntry]) -> Vec<&SoundEntry> {
-    sounds.iter().collect()
-}
-
 /// Owns the per-grid context state (`SlotMap`, trigger labels, meta store) so a
 /// `GridCtx` can borrow from it for the duration of a bench iteration. Empty /
 /// default state represents the common case (no slots bound, no favorites).
@@ -111,8 +106,13 @@ impl Default for GridFixture {
 /// Builds the grid `Element` and runs Iced's layout + draw passes against the
 /// provided renderer. This is the `view()`-construction + tessellation work
 /// ADR-009 cares about. Rasterization is renderer-specific (done by callers).
-fn layout_and_draw(sounds: &[&SoundEntry], grid: GridCtx, renderer: &mut iced::Renderer) {
-    let element: Element<'_, Message> = view_grid(sounds.to_vec(), None, grid);
+fn layout_and_draw(
+    sounds: &[SoundEntry],
+    visible_indices: &[usize],
+    grid: GridCtx,
+    renderer: &mut iced::Renderer,
+) {
+    let element: Element<'_, Message> = view_grid(sounds, visible_indices, None, grid);
     let bounds = Size::new(VIEW_W as f32, VIEW_H as f32);
     let mut ui = UserInterface::build(element, bounds, Cache::new(), renderer);
     let theme = Theme::Dark;
@@ -138,12 +138,12 @@ fn full_damage() -> [Rectangle; 1] {
 /// Full tiny-skia render: layout + draw + CPU rasterization into a `Pixmap`.
 /// This is the `HONKHONK_RENDERER=software` path. Returns the top-left pixel so
 /// the optimizer cannot elide the raster. Always available (pure CPU).
-pub fn render_tiny_skia(sounds: &[&SoundEntry], grid: GridCtx) -> u32 {
+pub fn render_tiny_skia(sounds: &[SoundEntry], visible_indices: &[usize], grid: GridCtx) -> u32 {
     // The `Element` is generic over `iced::Renderer` (the fallback enum); its
     // `Secondary` arm *is* the tiny-skia renderer, so draw lands in its layers.
     let mut renderer =
         iced::Renderer::Secondary(iced_tiny_skia::Renderer::new(Font::DEFAULT, text_size()));
-    layout_and_draw(sounds, grid, &mut renderer);
+    layout_and_draw(sounds, visible_indices, grid, &mut renderer);
 
     let iced::Renderer::Secondary(ts) = &mut renderer else {
         unreachable!("constructed Secondary");
@@ -235,13 +235,18 @@ pub fn init_wgpu() -> Option<WgpuCtx> {
 /// Full wgpu render: layout + draw + present to the reusable offscreen target.
 /// Returns a token so the work cannot be optimized away. Requires an
 /// initialized context.
-pub fn try_render_wgpu(sounds: &[&SoundEntry], grid: GridCtx, gpu: &WgpuCtx) -> u32 {
+pub fn try_render_wgpu(
+    sounds: &[SoundEntry],
+    visible_indices: &[usize],
+    grid: GridCtx,
+    gpu: &WgpuCtx,
+) -> u32 {
     let mut renderer = iced::Renderer::Primary(iced_wgpu::Renderer::new(
         gpu.engine.clone(),
         Font::DEFAULT,
         text_size(),
     ));
-    layout_and_draw(sounds, grid, &mut renderer);
+    layout_and_draw(sounds, visible_indices, grid, &mut renderer);
 
     let iced::Renderer::Primary(wr) = &mut renderer else {
         unreachable!("constructed Primary");
@@ -272,7 +277,7 @@ pub fn self_check() {
         u64::from_str_radix(head, 16).expect("fixture id head parses as hex");
     }
     let sounds = make_sounds(50);
-    let refs = sound_refs(&sounds);
+    let visible_indices = (0..sounds.len()).collect::<Vec<_>>();
     let fx = GridFixture::new();
-    let _ = render_tiny_skia(&refs, fx.grid_ctx(5));
+    let _ = render_tiny_skia(&sounds, &visible_indices, fx.grid_ctx(5));
 }
