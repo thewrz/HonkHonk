@@ -1,11 +1,13 @@
 use iced::{
     Alignment, Element, Length,
-    widget::{button, column, container, row, text},
+    widget::{button, container, row, text},
 };
 
 use crate::app::{HonkHonk, Message};
 use crate::settings::{ControlType, SettingDef, SettingId, SettingValue};
 use crate::ui::theme::{self, Hh, Theme};
+
+use super::common::label_hint_column;
 
 /// Generic registry row renderer.
 pub(super) fn render_setting_row<'a>(
@@ -15,7 +17,7 @@ pub(super) fn render_setting_row<'a>(
     highlighted: bool,
 ) -> Element<'a, Message> {
     let value = get_setting_value(def.id, state);
-    let label_col = setting_label(def, t);
+    let label_col = label_hint_column(def.label, def.hint, t);
     let control = setting_control(def, value, t);
 
     container(
@@ -44,22 +46,6 @@ pub(super) fn render_setting_row<'a>(
         ),
         ..Default::default()
     })
-    .into()
-}
-
-fn setting_label(def: &SettingDef, t: Theme) -> Element<'_, Message> {
-    column![
-        text(def.label)
-            .size(theme::font::BODY)
-            .color(t.ink())
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..Default::default()
-            }),
-        text(def.hint).size(theme::font::LABEL).color(t.ink_dim()),
-    ]
-    .spacing(theme::space::XS)
-    .width(Length::Fixed(260.0))
     .into()
 }
 

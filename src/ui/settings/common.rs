@@ -6,6 +6,26 @@ use iced::{
 use crate::app::Message;
 use crate::ui::theme::{self, Hh, Theme};
 
+pub(super) fn label_hint_column(
+    label: &'static str,
+    hint: &'static str,
+    t: Theme,
+) -> Element<'static, Message> {
+    column![
+        text(label)
+            .size(theme::font::BODY)
+            .color(t.ink())
+            .font(iced::Font {
+                weight: iced::font::Weight::Bold,
+                ..Default::default()
+            }),
+        text(hint).size(theme::font::LABEL).color(t.ink_dim()),
+    ]
+    .spacing(theme::space::XS)
+    .width(Length::Fixed(260.0))
+    .into()
+}
+
 /// Shared section chrome: bold italic title + subtitle + 2px ink underline + body.
 pub(super) fn section_layout<'a>(
     title: &'static str,

@@ -3,7 +3,7 @@ use iced::{
     widget::{Column, Row, button, column, container, row, text},
 };
 
-use super::common::section_layout;
+use super::common::{label_hint_column, section_layout};
 use super::controls::render_setting_row;
 use crate::app::{HonkHonk, Message};
 use crate::settings::{SETTINGS_REGISTRY, SettingCategory};
@@ -63,7 +63,7 @@ fn folders_row<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
     .width(Length::Fixed(540.0));
 
     row![
-        row_label(
+        label_hint_column(
             "Sound folders",
             "HonkHonk watches these folders. Drop in MP3 / WAV / OGG / FLAC.",
             t
@@ -145,27 +145,11 @@ fn supported_formats_row(t: Theme) -> Element<'static, Message> {
         .collect();
 
     row![
-        row_label("Supported formats", "Decoded via Symphonia — pure Rust.", t),
+        label_hint_column("Supported formats", "Decoded via Symphonia — pure Rust.", t),
         Row::with_children(format_pills).spacing(theme::space::XS),
     ]
     .spacing(theme::space::XL)
     .align_y(Alignment::Center)
     .width(Length::Fill)
-    .into()
-}
-
-fn row_label(label: &'static str, hint: &'static str, t: Theme) -> Element<'static, Message> {
-    column![
-        text(label)
-            .size(theme::font::BODY)
-            .color(t.ink())
-            .font(iced::Font {
-                weight: iced::font::Weight::Bold,
-                ..Default::default()
-            }),
-        text(hint).size(theme::font::LABEL).color(t.ink_dim()),
-    ]
-    .spacing(theme::space::XS)
-    .width(Length::Fixed(260.0))
     .into()
 }

@@ -3,7 +3,7 @@ use iced::{
     widget::{column, container, pick_list, row, text},
 };
 
-use super::common::section_layout;
+use super::common::{label_hint_column, section_layout};
 use super::controls::render_setting_row;
 use crate::app::{HonkHonk, Message};
 use crate::settings::{SETTINGS_REGISTRY, SettingCategory};
@@ -203,24 +203,10 @@ fn device_row<'a>(
     t: Theme,
 ) -> Element<'a, Message> {
     container(
-        row![
-            column![
-                text(label)
-                    .size(theme::font::BODY)
-                    .color(t.ink())
-                    .font(iced::Font {
-                        weight: iced::font::Weight::Bold,
-                        ..Default::default()
-                    }),
-                text(hint).size(theme::font::LABEL).color(t.ink_dim()),
-            ]
-            .spacing(theme::space::XS)
-            .width(Length::Fixed(260.0)),
-            control,
-        ]
-        .spacing(theme::space::XL)
-        .align_y(Alignment::Center)
-        .width(Length::Fill),
+        row![label_hint_column(label, hint, t), control,]
+            .spacing(theme::space::XL)
+            .align_y(Alignment::Center)
+            .width(Length::Fill),
     )
     .width(Length::Fill)
     .padding([18.0, 0.0])
