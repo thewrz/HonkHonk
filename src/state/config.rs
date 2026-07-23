@@ -74,7 +74,7 @@ pub struct AppConfig {
     pub overlap_mode: OverlapMode,
     #[serde(default = "default_true")]
     pub panel_animations: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "sort::deserialize_sort_prefs")]
     pub sort_prefs: BTreeMap<String, SortPref>,
 }
 
