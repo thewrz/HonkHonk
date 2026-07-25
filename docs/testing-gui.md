@@ -51,7 +51,7 @@ The current Manjaro box needs KWin 6, Spectacle, AT-SPI's bus launcher,
 outside the repository:
 
 ```bash
-GUI_VENV="${XDG_DATA_HOME:-$HOME/.local/share}/honkhonk-gui-test"
+GUI_VENV="${XDG_DATA_HOME:-$HOME/.local/share}/honkhonk/gui-test"
 uv venv --python 3.12 "$GUI_VENV"
 uv pip install --python "$GUI_VENV/bin/python" \
   'https://files.pythonhosted.org/packages/d4/26/c57e82a8c17029b647ff2ba357e590c683e7f12db4aa631ba678ef5de6b1/kwin_mcp-0.7.0-py3-none-any.whl#sha256=f4175b36a2869a9c4dfaad7992c905a97b11bd5a5079e713ee20321227424559'
