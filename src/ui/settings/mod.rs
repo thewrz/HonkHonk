@@ -15,6 +15,8 @@ use crate::ui::theme::{self, Hh, Theme};
 use crate::ui::{search_bar, settings::common::section_layout};
 
 pub use controls::{get_setting_value, setting_message};
+#[cfg(test)]
+pub(crate) use scroll::highlighted_row_id;
 pub(crate) use scroll::{content_scroll_id, locate_setting_row};
 
 const SETTINGS_SECTIONS: &[SettingsSection] = &[

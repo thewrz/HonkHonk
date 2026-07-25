@@ -19,6 +19,11 @@ pub fn input_id() -> iced::widget::Id {
     iced::widget::Id::new(INPUT_ID)
 }
 
+/// Returns the stable widget identifier used for settings focus and selection.
+pub(crate) fn settings_input_id() -> iced::widget::Id {
+    iced::widget::Id::new(SETTINGS_INPUT_ID)
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "stable stack layout avoids Iced text-input focus reset across query states"
@@ -56,7 +61,7 @@ where
         query,
         SearchInputConfig {
             placeholder: "Search settings\u{2026}",
-            id: iced::widget::Id::new(SETTINGS_INPUT_ID),
+            id: settings_input_id(),
             width: Length::Fill,
             theme: t,
         },

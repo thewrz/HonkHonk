@@ -47,6 +47,10 @@ pipewire-test = []
 
 [dev-dependencies]
 tempfile = "3"
+# Official headless interaction harness shipped with Iced. It exercises the
+# real widget tree and update messages without winit or a compositor. Pinned to
+# the app's Iced line; license: MIT (cargo-deny clean). Issue #215.
+iced_test = "=0.14.0"
 # Bench harness for the sound-grid render baseline (ADR-009). Criterion is the
 # de-facto Rust micro-benchmark standard; stdlib #[bench] is nightly-only.
 # License: Apache-2.0 OR MIT (cargo-deny clean).
