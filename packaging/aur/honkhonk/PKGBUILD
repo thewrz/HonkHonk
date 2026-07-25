@@ -33,6 +33,9 @@ makedepends=(
     # too would be redundant (namcap warns). Same for gtk3/wayland/libxkbcommon:
     # on Arch the runtime packages ship their own headers + .pc files.
 )
+checkdepends=(
+    'ttf-dejavu' # deterministic sans/mono faces for iced_test text shaping
+)
 provides=('honkhonk')
 conflicts=('honkhonk-bin' 'honkhonk-git')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/$_pkgtag.tar.gz")

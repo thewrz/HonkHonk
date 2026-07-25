@@ -16,6 +16,18 @@ pub(super) fn row_id(setting: SettingId) -> Id {
     Id::new(setting_key(setting))
 }
 
+pub(crate) fn highlighted_row_id(setting: SettingId) -> Id {
+    Id::from(format!("{}-search-highlight", setting_key(setting)))
+}
+
+pub(super) fn rendered_row_id(setting: SettingId, highlighted: bool) -> Id {
+    if highlighted {
+        highlighted_row_id(setting)
+    } else {
+        row_id(setting)
+    }
+}
+
 pub(crate) fn locate_setting_row(request: RowRestoreRequest) -> Task<Message> {
     iced::advanced::widget::operate(FindRowOffset::new(request.setting()))
         .map(move |offset| SettingsMessage::RowLocated { request, offset }.into())
