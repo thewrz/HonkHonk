@@ -117,15 +117,14 @@ def capture_active_window_dbus(dbus_address: str, path: Path) -> Path:
     interface = dbus.Interface(screenshot, "org.kde.KWin.ScreenShot2")
     read_fd, write_fd = os.pipe()
     try:
-        options = {
-            "include-cursor": dbus.Boolean(False),
-            "include-decoration": dbus.Boolean(False),
-        }
-        results = interface.CaptureActiveWindow(options, dbus.types.UnixFd(write_fd))
-    finally:
-        os.close(write_fd)
-
-    try:
+        try:
+            options = {
+                "include-cursor": dbus.Boolean(False),
+                "include-decoration": dbus.Boolean(False),
+            }
+            results = interface.CaptureActiveWindow(options, dbus.types.UnixFd(write_fd))
+        finally:
+            os.close(write_fd)
         chunks = []
         while chunk := os.read(read_fd, 65_536):
             chunks.append(chunk)

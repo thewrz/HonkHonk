@@ -3,10 +3,16 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from PIL import Image
 
-from gui_smoke_kde import app_environment, frame_is_non_black, is_non_black_pixels
+from gui_smoke_kde import (
+    app_environment,
+    capture_active_window_dbus,
+    frame_is_non_black,
+    is_non_black_pixels,
+)
 
 
 class PixelClassificationTests(unittest.TestCase):
@@ -44,6 +50,30 @@ class LaunchEnvironmentTests(unittest.TestCase):
 
         self.assertEqual(environment["WAYLAND_DISPLAY"], "wayland-0")
         self.assertEqual(environment["HONKHONK_RENDERER"], "wgpu")
+
+
+class CaptureCleanupTests(unittest.TestCase):
+    @mock.patch("os.close")
+    @mock.patch("os.pipe", return_value=(17, 18))
+    @mock.patch("dbus.types.UnixFd", side_effect=lambda descriptor: descriptor)
+    @mock.patch("dbus.Interface")
+    @mock.patch("dbus.bus.BusConnection")
+    def test_closes_both_pipe_ends_when_dbus_capture_fails(
+        self,
+        connection: mock.Mock,
+        interface: mock.Mock,
+        _unix_fd: mock.Mock,
+        _pipe: mock.Mock,
+        close: mock.Mock,
+    ) -> None:
+        """A failed ScreenShot2 request cannot leak either descriptor."""
+        connection.return_value.get_object.return_value = mock.Mock()
+        interface.return_value.CaptureActiveWindow.side_effect = RuntimeError("failed")
+
+        with self.assertRaisesRegex(RuntimeError, "failed"):
+            capture_active_window_dbus("unix:path=/tmp/test-bus", Path("unused.png"))
+
+        self.assertCountEqual(close.call_args_list, [mock.call(17), mock.call(18)])
 
 
 if __name__ == "__main__":
