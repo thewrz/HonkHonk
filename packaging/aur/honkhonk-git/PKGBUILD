@@ -21,6 +21,9 @@ makedepends=(
     'clang'   # libclang.so — pipewire-sys runs bindgen at build time
     'git'     # VCS source checkout + pkgver()
 )
+checkdepends=(
+    'ttf-dejavu' # deterministic sans/mono faces for iced_test text shaping
+)
 provides=('honkhonk')
 conflicts=('honkhonk' 'honkhonk-bin')
 source=("git+$url.git#branch=main")

@@ -26,7 +26,7 @@ pub(super) fn render_setting_row<'a>(
             .align_y(Alignment::Start)
             .width(Length::Fill),
     )
-    .id(super::scroll::row_id(def.id))
+    .id(super::scroll::rendered_row_id(def.id, highlighted))
     .width(Length::Fill)
     .padding([18.0, 10.0])
     .style(move |_t| container::Style {

@@ -5,6 +5,11 @@ use super::{HonkHonk, Message, SettingsSection, ViewMode};
 use crate::settings::SettingId;
 use crate::settings::search::{RestoreTarget, RowRestoreRequest, ScrollOffset};
 
+#[cfg(test)]
+mod gui_tests;
+#[cfg(test)]
+mod test_support;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SettingsMessage {
     Show,
