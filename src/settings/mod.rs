@@ -1,7 +1,10 @@
-/// Central settings registry — pure metadata, zero coupling to app state.
-/// To add a new setting: add to SettingId, add SettingDef to SETTINGS_REGISTRY,
-/// add arms to get_setting_value and setting_message in src/ui/settings.rs,
-/// add Message variant + update() handler in src/app.rs.
+//! Central settings registry — pure metadata, zero coupling to app state.
+//! To add a new setting: add to `SettingId`, add a `SettingDef` to
+//! `SETTINGS_REGISTRY`, add arms to `get_setting_value` and `setting_message` in
+//! `src/ui/settings/controls.rs`, then add a `Message` variant and `update()` handler
+//! in `src/app/mod.rs`.
+
+pub mod search;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SettingId {
@@ -20,13 +23,26 @@ pub enum SettingId {
     Renderer,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SettingCategory {
+    #[default]
     Audio,
     Library,
     Hotkeys,
     Appearance,
     About,
+}
+
+impl SettingCategory {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Audio => "Audio",
+            Self::Library => "Library",
+            Self::Hotkeys => "Hotkeys",
+            Self::Appearance => "Appearance",
+            Self::About => "About",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -46,11 +62,13 @@ pub enum SettingValue {
     None,
 }
 
+#[derive(Debug)]
 pub struct SettingDef {
     pub id: SettingId,
     pub category: SettingCategory,
     pub label: &'static str,
     pub hint: &'static str,
+    pub keywords: &'static [&'static str],
     pub control: ControlType,
 }
 
@@ -60,6 +78,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Appearance,
         label: "Theme",
         hint: "Light, Dark, or follow your desktop environment.",
+        keywords: &["color", "light", "dark", "system"],
         control: ControlType::Radio(&["Light", "Dark", "System"]),
     },
     SettingDef {
@@ -67,6 +86,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Appearance,
         label: "Grid density",
         hint: "Number of tiles per row.",
+        keywords: &["tiles", "columns", "layout", "compact", "comfy"],
         control: ControlType::Radio(&["Compact", "Regular", "Comfy"]),
     },
     SettingDef {
@@ -74,6 +94,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Appearance,
         label: "GPU acceleration",
         hint: "Disable for VMs or older hardware. Takes effect after restart.",
+        keywords: &["graphics", "wgpu", "software", "renderer", "vm"],
         control: ControlType::Toggle,
     },
     SettingDef {
@@ -81,6 +102,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Appearance,
         label: "Panel feather puff",
         hint: "Play the short feather burst when panels open or close.",
+        keywords: &["animation", "motion", "feather", "effects"],
         control: ControlType::Toggle,
     },
     SettingDef {
@@ -88,6 +110,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Audio,
         label: "Mic passthrough",
         hint: "Mix your real mic into the virtual mic.",
+        keywords: &["microphone", "input", "virtual mic", "mix"],
         control: ControlType::Toggle,
     },
     SettingDef {
@@ -95,6 +118,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Audio,
         label: "Passthrough level",
         hint: "Mic gain into virtual mic. Audio effect lands in issue #29.",
+        keywords: &["microphone", "gain", "volume", "virtual mic"],
         control: ControlType::Slider {
             min: 0.0,
             max: 1.0,
@@ -106,6 +130,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Audio,
         label: "Overlap mode",
         hint: "Whether tile presses layer sounds or stop all active voices before the new sound.",
+        keywords: &["playback", "concurrent", "interrupt", "polyphony"],
         control: ControlType::Radio(&["Concurrent", "Interrupt"]),
     },
     SettingDef {
@@ -113,6 +138,7 @@ pub static SETTINGS_REGISTRY: &[SettingDef] = &[
         category: SettingCategory::Library,
         label: "Scan now",
         hint: "Force a re-scan of all sound folders.",
+        keywords: &["refresh", "reload", "folders", "library"],
         control: ControlType::Button,
     },
 ];

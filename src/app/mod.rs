@@ -34,8 +34,11 @@ pub(crate) mod notices;
 mod panels;
 mod playback;
 mod recording;
+mod settings;
 mod sorting;
 mod sound_metadata;
+
+pub use settings::SettingsMessage;
 
 /// Virtual category name used for the Favorites filtered tab.
 pub const FAVORITES_TAB: &str = "\u{2605} Favorites";
@@ -48,18 +51,11 @@ pub enum ViewMode {
     Settings,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub enum SettingsSection {
-    #[default]
-    Audio,
-    Library,
-    Hotkeys,
-    Appearance,
-    About,
-}
+pub use crate::settings::SettingCategory as SettingsSection;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Message {
+    NoOp,
     ToggleVisibility,
     Quit,
     TrayEvent(TrayEvent),
@@ -127,9 +123,7 @@ pub enum Message {
     ShowSlots,
     ShowMain,
     SelectSlot(u8),
-    // Settings navigation
-    ShowSettings,
-    ShowSettingsSection(SettingsSection),
+    Settings(SettingsMessage),
     // Library management
     RescanLibrary,
     AddSoundDirectory,
@@ -228,7 +222,7 @@ pub struct HonkHonk {
     duration_scan_pairs: std::sync::Arc<Vec<(String, std::path::PathBuf)>>,
     view_mode: ViewMode,
     selected_slot: Option<u8>,
-    pub(crate) settings_section: SettingsSection,
+    pub(crate) settings_ui: crate::settings::search::SettingsUiState,
     pub monitor_devices: Vec<(String, String)>,
     pub input_devices: Vec<(String, String)>,
     shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService,
@@ -453,7 +447,7 @@ impl HonkHonk {
             duration_scan_pairs,
             view_mode: ViewMode::default(),
             selected_slot: None,
-            settings_section: SettingsSection::default(),
+            settings_ui: crate::settings::search::SettingsUiState::default(),
             monitor_devices: Vec::new(),
             input_devices: Vec::new(),
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
@@ -520,7 +514,7 @@ impl HonkHonk {
             duration_scan_pairs: std::sync::Arc::new(Vec::new()),
             view_mode: ViewMode::default(),
             selected_slot: None,
-            settings_section: SettingsSection::default(),
+            settings_ui: crate::settings::search::SettingsUiState::default(),
             monitor_devices: Vec::new(),
             input_devices: Vec::new(),
             shortcut_config: crate::shortcuts::config_ui::ShortcutConfigService::new(),
@@ -662,6 +656,7 @@ impl HonkHonk {
     )]
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::NoOp => Task::none(),
             Message::ToggleVisibility => {
                 self.visible = !self.visible;
                 if !self.visible {
@@ -995,16 +990,7 @@ impl HonkHonk {
                 self.selected_slot = None;
                 Task::none()
             }
-            Message::ShowSettings => {
-                self.dismiss_sound_sort_menu();
-                self.view_mode = ViewMode::Settings;
-                self.settings_section = SettingsSection::Audio;
-                Task::none()
-            }
-            Message::ShowSettingsSection(section) => {
-                self.settings_section = section;
-                Task::none()
-            }
+            Message::Settings(message) => self.update_settings(message),
             Message::SelectSlot(idx) => {
                 self.selected_slot = Some(idx);
                 Task::none()
@@ -2453,28 +2439,30 @@ mod tests {
     #[test]
     fn show_settings_sets_view_mode() {
         let mut app = HonkHonk::new_for_test();
-        let _ = app.update(Message::ShowSettings);
+        let _ = app.update(Message::Settings(SettingsMessage::Show));
         assert!(matches!(app.view_mode, ViewMode::Settings));
     }
 
     #[test]
     fn show_settings_defaults_section_to_audio() {
         let mut app = HonkHonk::new_for_test();
-        let _ = app.update(Message::ShowSettings);
-        assert!(matches!(app.settings_section, SettingsSection::Audio));
+        let _ = app.update(Message::Settings(SettingsMessage::Show));
+        assert_eq!(app.settings_ui.section(), SettingsSection::Audio);
     }
 
     #[test]
     fn show_settings_section_updates_active_section() {
         let mut app = HonkHonk::new_for_test();
-        let _ = app.update(Message::ShowSettingsSection(SettingsSection::Library));
-        assert!(matches!(app.settings_section, SettingsSection::Library));
+        let _ = app.update(Message::Settings(SettingsMessage::ShowSection(
+            SettingsSection::Library,
+        )));
+        assert_eq!(app.settings_ui.section(), SettingsSection::Library);
     }
 
     #[test]
     fn show_main_from_settings_resets_view_mode() {
         let mut app = HonkHonk::new_for_test();
-        let _ = app.update(Message::ShowSettings);
+        let _ = app.update(Message::Settings(SettingsMessage::Show));
         let _ = app.update(Message::ShowMain);
         assert!(matches!(app.view_mode, ViewMode::Main));
     }
