@@ -6,6 +6,8 @@ target/
 .idea/
 *.swp
 *~
+__pycache__/
+*.py[cod]
 .helix/
 .zed/
 .aider*
