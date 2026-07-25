@@ -1,8 +1,12 @@
 """Unit tests for the KDE real-pixel smoke harness."""
 
+import tempfile
 import unittest
+from pathlib import Path
 
-from gui_smoke_kde import app_environment, is_non_black_pixels
+from PIL import Image
+
+from gui_smoke_kde import app_environment, frame_is_non_black, is_non_black_pixels
 
 
 class PixelClassificationTests(unittest.TestCase):
@@ -21,6 +25,16 @@ class PixelClassificationTests(unittest.TestCase):
         pixels = [(0, 0, 0)] * 991 + [(255, 255, 255)] * 9
 
         self.assertFalse(is_non_black_pixels(pixels))
+
+    def test_checks_the_entire_active_window_capture(self) -> None:
+        """Visible content outside the screen center still counts."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "active-window.png"
+            image = Image.new("RGB", (100, 100))
+            image.paste((40, 40, 40), (0, 0, 20, 20))
+            image.save(path)
+
+            self.assertTrue(frame_is_non_black(path))
 
 
 class LaunchEnvironmentTests(unittest.TestCase):

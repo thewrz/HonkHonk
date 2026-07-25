@@ -91,10 +91,11 @@ The script:
 2. Names the private compositor socket `wayland-0`.
 3. launches HonkHonk with `WAYLAND_DISPLAY=wayland-0` and
    `HONKHONK_RENDERER=wgpu`.
-4. captures through KWin ScreenShot2, with Spectacle as the fallback.
-5. writes `target/gui-smoke/honkhonk.png` only after at least 1% of the central
-   client-region pixels are brighter than the near-black cutoff. Cropping out
-   KWin's decoration prevents a painted title bar from masking a black client.
+4. captures the active HonkHonk client window through KWin ScreenShot2, with
+   Spectacle active-window capture as the fallback.
+5. writes `target/gui-smoke/honkhonk.png` only after at least 1% of the active
+   client-window pixels are brighter than the near-black cutoff. Excluding KWin
+   decoration prevents a painted title bar from masking a black client.
 
 The isolated runtime has no real PipeWire or portal service. Corresponding
 in-app error banners are expected and do not invalidate this renderer smoke.
@@ -119,7 +120,7 @@ black on this development box; it remains a functional fallback only.
 Run the small script-boundary tests independently:
 
 ```bash
-python -m unittest discover -s scripts -p 'test_*.py'
+"$GUI_VENV/bin/python" -m unittest discover -s scripts -p 'test_*.py'
 ```
 
 ## Coordinate calibration before input
