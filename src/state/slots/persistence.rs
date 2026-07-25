@@ -87,7 +87,15 @@ impl SlotMap {
                 path: path.display().to_string(),
                 source,
             })?;
-        std::fs::write(path, json).map_err(|source| ConfigError::Io {
+        // Write to a sibling temp file and rename into place so a crash or
+        // full disk mid-write can never truncate the previously good file.
+        // The pid suffix keeps concurrent app instances off each other's temp.
+        let temp_path = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        std::fs::write(&temp_path, json).map_err(|source| ConfigError::Io {
+            path: temp_path.display().to_string(),
+            source,
+        })?;
+        std::fs::rename(&temp_path, path).map_err(|source| ConfigError::Io {
             path: path.display().to_string(),
             source,
         })

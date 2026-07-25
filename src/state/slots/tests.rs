@@ -232,6 +232,31 @@ fn missing_file_is_a_writable_default() {
 }
 
 #[test]
+fn save_replaces_existing_file_atomically_without_leftover_temp() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("slots.json");
+    let mut slots = SlotMap::default();
+    slots.set(0, PathBuf::from("/sounds/old.wav"));
+    slots.save_to(&path).unwrap();
+
+    let mut updated = SlotMap::load_from(&path);
+    updated.set(0, PathBuf::from("/sounds/new.wav"));
+    // A read-only destination distinguishes a whole-file swap from an in-place
+    // truncate-and-write: only the atomic rename path can replace it.
+    let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&path, permissions).unwrap();
+    updated.save_to(&path).unwrap();
+
+    assert_eq!(
+        SlotMap::load_from(&path).get(0),
+        Some(&PathBuf::from("/sounds/new.wav"))
+    );
+    let entries = std::fs::read_dir(dir.path()).unwrap().count();
+    assert_eq!(entries, 1, "no temp file may linger after a save");
+}
+
+#[test]
 fn unreadable_source_is_read_protected() {
     let dir = tempdir().unwrap();
     let loaded = SlotMap::load_from(dir.path());
