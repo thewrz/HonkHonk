@@ -1,4 +1,4 @@
-app-id: io.github.thewrz.HonkHonk
+app-id: io.github.wrzonance.HonkHonk
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
@@ -41,15 +41,18 @@ modules:
       # Install binary — /app/bin is on PATH inside the sandbox
       - install -Dm755 target/x86_64-unknown-linux-gnu/release/honkhonk
           /app/bin/honkhonk
-      # Install .desktop entry — /app/share is in XDG_DATA_DIRS
-      - install -Dm644 assets/honkhonk.desktop
-          /app/share/applications/io.github.thewrz.HonkHonk.desktop
-      # Install icon
-      - install -Dm644 assets/icons/hicolor/256x256/apps/honkhonk.png
-          /app/share/icons/hicolor/256x256/apps/honkhonk.png
+      # Install .desktop entry — rewrite Icon= to the full app-id in a scratch
+      # copy so we never mutate assets/honkhonk.desktop (deb/appimage packaging
+      # asserts it stays generic; see tests/packaging/deb_validate.sh).
+      - sed 's/^Icon=honkhonk$/Icon=io.github.wrzonance.HonkHonk/'
+          assets/honkhonk.desktop > /tmp/io.github.wrzonance.HonkHonk.desktop
+      - install -Dm644 /tmp/io.github.wrzonance.HonkHonk.desktop
+          /app/share/applications/io.github.wrzonance.HonkHonk.desktop
+      # Install the full app-id-named icon set (all sizes + scalable + symbolic)
+      - cp -r assets/icons/generated/hicolor /app/share/icons/
       # Install AppStream metainfo
-      - install -Dm644 packaging/flatpak/io.github.thewrz.HonkHonk.metainfo.xml
-          /app/share/metainfo/io.github.thewrz.HonkHonk.metainfo.xml
+      - install -Dm644 packaging/flatpak/io.github.wrzonance.HonkHonk.metainfo.xml
+          /app/share/metainfo/io.github.wrzonance.HonkHonk.metainfo.xml
       # NOTE (issue #49): the persistent PipeWire conf.d drop-in is NOT installed
       # in the Flatpak. The sandbox cannot write host PipeWire config, and the
       # app talks to PipeWire via the pulseaudio socket. The app's first-run

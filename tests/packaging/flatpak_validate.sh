@@ -5,7 +5,8 @@ set -euo pipefail
 
 PASS=0
 FAIL=0
-MANIFEST="packaging/flatpak/io.github.thewrz.HonkHonk.yml"
+MANIFEST="packaging/flatpak/io.github.wrzonance.HonkHonk.yml"
+METAINFO="packaging/flatpak/io.github.wrzonance.HonkHonk.metainfo.xml"
 
 check() {
     local desc="$1"
@@ -34,7 +35,7 @@ if python3 - 2>/dev/null <<'PYEOF'
 import sys
 try:
     import yaml
-    yaml.safe_load(open("packaging/flatpak/io.github.thewrz.HonkHonk.yml"))
+    yaml.safe_load(open("packaging/flatpak/io.github.wrzonance.HonkHonk.yml"))
 except ImportError:
     pass  # pyyaml not available — skip, other checks verify structure
 except Exception:
@@ -47,9 +48,9 @@ else
 fi
 
 # ── App identity ──────────────────────────────────────────────────────
-has 'io.github.thewrz.HonkHonk' \
-    && check "app-id is io.github.thewrz.HonkHonk" "ok" \
-    || check "app-id is io.github.thewrz.HonkHonk" "missing"
+has 'io.github.wrzonance.HonkHonk' \
+    && check "app-id is io.github.wrzonance.HonkHonk" "ok" \
+    || check "app-id is io.github.wrzonance.HonkHonk" "missing"
 
 has 'org.freedesktop.Platform' \
     && check "runtime is org.freedesktop.Platform" "ok" \
@@ -99,13 +100,37 @@ else
 fi
 
 # ── Assets: .desktop and icon ─────────────────────────────────────────
-has 'honkhonk.desktop' \
-    && check "manifest references honkhonk.desktop" "ok" \
-    || check "manifest references honkhonk.desktop" "missing"
+has 'io.github.wrzonance.HonkHonk.desktop' \
+    && check "desktop installs under the full app-id" "ok" \
+    || check "desktop installs under the full app-id" "missing"
 
-has 'honkhonk.png' \
-    && check "manifest references icon" "ok" \
-    || check "manifest references icon" "missing"
+has 'assets/icons/generated/hicolor' \
+    && check "manifest installs the full app-id-named icon set" "ok" \
+    || check "manifest installs the full app-id-named icon set" "missing"
+
+# ── No stale identity left behind ─────────────────────────────────────
+for f in "$MANIFEST" "$METAINFO" .github/workflows/flatpak.yml; do
+    if [ -f "$f" ]; then
+        ! grep -qF 'io.github.thewrz' "$f" \
+            && check "$f has no stale thewrz identity" "ok" \
+            || check "$f has no stale thewrz identity" "found io.github.thewrz reference"
+    else
+        check "$f has no stale thewrz identity" "missing: $f"
+    fi
+done
+
+# ── AppStream strict validation ────────────────────────────────────────
+if command -v appstreamcli >/dev/null 2>&1; then
+    check "appstreamcli is available" "ok"
+    if appstreamcli validate --strict --no-net "$METAINFO" >/tmp/appstream-validate.log 2>&1; then
+        check "metainfo passes appstreamcli --strict" "ok"
+    else
+        check "metainfo passes appstreamcli --strict" \
+            "$(tail -n5 /tmp/appstream-validate.log | tr '\n' ' ')"
+    fi
+else
+    check "appstreamcli is available" "not installed — strict validation skipped"
+fi
 
 # ── Summary ───────────────────────────────────────────────────────────
 echo ""
