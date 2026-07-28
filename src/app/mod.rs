@@ -42,6 +42,14 @@ mod slot_sort;
 mod sorting;
 mod sound_metadata;
 
+/// Bridges `HotkeyRow` across the module-tree boundary between `crate::app`
+/// (which owns the state it's built from) and `crate::ui::settings::hotkeys`
+/// (a sibling tree that renders it) — see `hotkeys.rs`'s module doc.
+#[allow(
+    unused_imports,
+    reason = "cross-module-tree bridge for #199; consumed by ui/settings/hotkeys.rs in a follow-up task"
+)]
+pub(crate) use hotkeys::HotkeyRow;
 pub use settings::SettingsMessage;
 
 /// Virtual category name used for the Favorites filtered tab.
@@ -216,6 +224,19 @@ pub struct HonkHonk {
     progress: f32,
     slots: SlotMap,
     pub(crate) slot_triggers: [Option<String>; 20],
+    /// Settings → Shortcuts bindings list filter query (#199). Independent of
+    /// the main grid's `filter` — each list-controls view owns its own state.
+    #[allow(
+        dead_code,
+        reason = "read by hotkeys::hotkey_filter_query/hotkey_rows; wired into a view by a follow-up task in this issue's task chain"
+    )]
+    hotkey_filter: FilterState,
+    /// Settings → Shortcuts bindings list sort state (#199).
+    #[allow(
+        dead_code,
+        reason = "read by hotkeys::hotkey_sort_state/hotkey_rows; wired into a view by a follow-up task in this issue's task chain"
+    )]
+    hotkey_sort: hotkeys::HotkeySortState,
     pub(crate) shortcuts_status: ShortcutsStatus,
     context_menu: Option<String>,
     context_menu_pos: Option<Point>,
@@ -417,6 +438,7 @@ impl HonkHonk {
         let rx = tray.take_rx();
         let sound_meta = library_scan::load_sound_meta(&scan);
         let sound_sort = sorting::sound_sort_from_config(&config);
+        let hotkey_sort = hotkeys::hotkey_sort_from_config(&config);
         let sounds = scan.entries;
         let duration_scan_pairs = std::sync::Arc::new(
             sounds
@@ -441,6 +463,8 @@ impl HonkHonk {
             progress: 0.0,
             slots,
             slot_triggers: std::array::from_fn(|_| None),
+            hotkey_filter: FilterState::default(),
+            hotkey_sort,
             shortcuts_status: ShortcutsStatus::Initializing,
             context_menu: None,
             context_menu_pos: None,
@@ -491,6 +515,7 @@ impl HonkHonk {
         let (_tx, rx) = std::sync::mpsc::channel();
         let config = AppConfig::default();
         let sound_sort = sorting::sound_sort_from_config(&config);
+        let hotkey_sort = hotkeys::hotkey_sort_from_config(&config);
         let mut app = Self {
             visible: true,
             exit: false,
@@ -508,6 +533,8 @@ impl HonkHonk {
             progress: 0.0,
             slots: SlotMap::default(),
             slot_triggers: std::array::from_fn(|_| None),
+            hotkey_filter: FilterState::default(),
+            hotkey_sort,
             shortcuts_status: ShortcutsStatus::Initializing,
             context_menu: None,
             context_menu_pos: None,
