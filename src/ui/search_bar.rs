@@ -5,6 +5,7 @@ use crate::ui::theme::{self, Hh, Theme};
 
 const INPUT_ID: &str = "honkhonk-shared-filter";
 const SETTINGS_INPUT_ID: &str = "honkhonk-settings-filter";
+const HOTKEYS_INPUT_ID: &str = "honkhonk-hotkeys-filter";
 
 #[derive(Clone)]
 struct SearchInputConfig<'a> {
@@ -22,6 +23,11 @@ pub fn input_id() -> iced::widget::Id {
 /// Returns the stable widget identifier used for settings focus and selection.
 pub(crate) fn settings_input_id() -> iced::widget::Id {
     iced::widget::Id::new(SETTINGS_INPUT_ID)
+}
+
+/// Returns the stable widget identifier used for hotkeys-section focus and selection.
+pub(crate) fn hotkeys_input_id() -> iced::widget::Id {
+    iced::widget::Id::new(HOTKEYS_INPUT_ID)
 }
 
 #[allow(
@@ -62,6 +68,27 @@ where
         SearchInputConfig {
             placeholder: "Search settings\u{2026}",
             id: settings_input_id(),
+            width: Length::Fill,
+            theme: t,
+        },
+        on_input,
+    )
+}
+
+/// Builds the click-only hotkeys-section search using the same stable input stack.
+pub fn view_hotkeys_search_bar<'a, Message>(
+    query: &'a str,
+    t: Theme,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    view_search_input(
+        query,
+        SearchInputConfig {
+            placeholder: "Search shortcuts\u{2026}",
+            id: hotkeys_input_id(),
             width: Length::Fill,
             theme: t,
         },
@@ -169,5 +196,50 @@ where
             .align_x(Alignment::End)
             .align_y(Alignment::Center)
             .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum TestMessage {
+        Input(String),
+    }
+
+    #[test]
+    fn hotkeys_input_id_is_stable_across_calls() {
+        assert_eq!(hotkeys_input_id(), hotkeys_input_id());
+    }
+
+    #[test]
+    fn hotkeys_input_id_is_distinct_from_other_search_inputs() {
+        let hotkeys = hotkeys_input_id();
+
+        assert_ne!(hotkeys, input_id());
+        assert_ne!(hotkeys, settings_input_id());
+    }
+
+    #[test]
+    fn hotkeys_input_id_uses_its_dedicated_dom_key() {
+        let debug = format!("{:?}", hotkeys_input_id());
+
+        assert!(
+            debug.contains(HOTKEYS_INPUT_ID),
+            "expected hotkeys input id to carry {HOTKEYS_INPUT_ID:?}, got {debug}"
+        );
+    }
+
+    #[test]
+    fn view_hotkeys_search_bar_builds_for_empty_query() {
+        let _element: Element<'_, TestMessage> =
+            view_hotkeys_search_bar("", Theme::Dark, TestMessage::Input);
+    }
+
+    #[test]
+    fn view_hotkeys_search_bar_builds_for_populated_query() {
+        let _element: Element<'_, TestMessage> =
+            view_hotkeys_search_bar("mute", Theme::Dark, TestMessage::Input);
     }
 }
