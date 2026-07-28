@@ -10,6 +10,7 @@ use crate::ui::list_controls::sort::{Direction, SortState};
 mod rows;
 #[cfg(test)]
 mod tests;
+mod view;
 
 pub(crate) use rows::HotkeyRow;
 

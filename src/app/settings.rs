@@ -56,6 +56,11 @@ impl HonkHonk {
     }
 
     pub(super) fn show_settings_section(&mut self, section: SettingsSection) -> Task<Message> {
+        // Any sort menu open on the previous section (tiles' or Hotkeys')
+        // must not survive a section switch: the anchor is a shared field,
+        // so leaving it set would let a menu opened on one section keep
+        // rendering (or silently reopen) on another.
+        self.sort_menu_anchor = None;
         self.settings_ui.select_section(section);
         Task::none()
     }
@@ -130,6 +135,21 @@ mod tests {
         app.toggle_sound_sort_menu();
 
         let _ = app.show_settings();
+
+        assert!(app.sort_menu_anchor.is_none());
+    }
+
+    #[test]
+    fn switching_section_dismisses_an_open_sort_menu() {
+        let mut app = HonkHonk::new_for_test();
+        app.settings_ui.select_section(SettingCategory::Hotkeys);
+        app.toggle_hotkey_sort_menu();
+        assert!(
+            app.sort_menu_anchor.is_some(),
+            "setup: sort menu did not open"
+        );
+
+        let _ = app.show_settings_section(SettingCategory::Appearance);
 
         assert!(app.sort_menu_anchor.is_none());
     }
