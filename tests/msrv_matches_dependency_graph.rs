@@ -1,8 +1,14 @@
 //! Pins the boundary invariant behind issue #218: the declared MSRV in
 //! `Cargo.toml` (`package.rust-version`) must always equal the highest
-//! `rust_version` declared by any direct, production dependency in the
-//! resolved graph. Iced is the binding constraint today; if some future
-//! dependency bump raises the real floor further, this test fails loudly
+//! `rust_version` declared by any production dependency reachable in the
+//! resolved graph. Transitive crates count: Cargo enforces `rust_version`
+//! against every package it compiles, not just the ones our own manifest
+//! names, so a dependency-of-a-dependency can set the real floor. That is
+//! the case today -- `fundsp` pulls in `wide`/`safe_arch`/`resampler` and
+//! `lofty` pulls in `ogg_pager`, all of which require 1.89, well above what
+//! any direct dependency declares for itself.
+//!
+//! If some future bump raises the floor further, this test fails loudly
 //! instead of letting the crate keep advertising a floor it can no longer
 //! build on.
 //!
@@ -10,6 +16,7 @@
 //! inside offline distro package builds (see `metadata_args`).
 
 use serde_json::Value;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::process::Command;
 
 /// A minimal `major.minor.patch` version -- enough to order the plain
@@ -46,9 +53,9 @@ fn declared_rust_version() -> Version {
 }
 
 /// Runs `cargo metadata` and returns the declared `rust_version` of every
-/// direct, production (non-dev, non-build) dependency, skipping dependencies
-/// that don't declare one at all.
-fn direct_production_dependency_versions() -> Vec<Version> {
+/// production (non-dev, non-build) dependency reachable from the root,
+/// skipping dependencies that don't declare one at all.
+fn production_dependency_versions() -> Vec<Version> {
     let metadata = run_cargo_metadata();
     let packages = metadata["packages"]
         .as_array()
@@ -59,18 +66,40 @@ fn direct_production_dependency_versions() -> Vec<Version> {
     let nodes = metadata["resolve"]["nodes"]
         .as_array()
         .expect("metadata.resolve.nodes must be an array");
-    let root_node = nodes
-        .iter()
-        .find(|node| node["id"] == root_id)
-        .expect("resolve.nodes must contain the root package");
 
-    root_node["deps"]
-        .as_array()
-        .expect("root node deps must be an array")
-        .iter()
-        .filter(|dep| is_normal_dependency(dep))
-        .filter_map(|dep| rust_version_of(dep["pkg"].as_str().unwrap_or_default(), packages))
+    reachable_production_packages(root_id, nodes)
+        .into_iter()
+        .filter_map(|pkg_id| rust_version_of(pkg_id, packages))
         .collect()
+}
+
+/// Breadth-first walk of `resolve.nodes` from the root, following only normal
+/// dependency edges. Stopping at the root's own edges would miss the crates
+/// that actually bind the floor, since a direct dependency can declare a low
+/// `rust_version` for itself while depending on something far newer.
+fn reachable_production_packages<'a>(root_id: &'a str, nodes: &'a [Value]) -> Vec<&'a str> {
+    let by_id: HashMap<&str, &Value> = nodes
+        .iter()
+        .filter_map(|node| node["id"].as_str().map(|id| (id, node)))
+        .collect();
+
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut queue: VecDeque<&str> = VecDeque::from([root_id]);
+    let mut reachable = Vec::new();
+
+    while let Some(id) = queue.pop_front() {
+        let Some(node) = by_id.get(id) else { continue };
+        for dep in node["deps"].as_array().into_iter().flatten() {
+            let Some(pkg) = dep["pkg"].as_str() else {
+                continue;
+            };
+            if is_normal_dependency(dep) && seen.insert(pkg) {
+                reachable.push(pkg);
+                queue.push_back(pkg);
+            }
+        }
+    }
+    reachable
 }
 
 fn cargo_bin() -> String {
@@ -142,19 +171,19 @@ fn rust_version_of(pkg_id: &str, packages: &[Value]) -> Option<Version> {
 }
 
 #[test]
-fn msrv_equals_max_direct_production_dependency_rust_version() {
+fn msrv_equals_max_production_dependency_rust_version() {
     let declared = declared_rust_version();
-    let deps = direct_production_dependency_versions();
+    let deps = production_dependency_versions();
     let max_dep = deps
         .into_iter()
         .max()
-        .expect("at least one direct production dependency must declare rust_version");
+        .expect("at least one production dependency must declare rust_version");
 
     assert_eq!(
         declared, max_dep,
         "package.rust-version ({declared:?}) must equal the highest rust_version \
-         among direct production dependencies ({max_dep:?}); update Cargo.toml's \
-         rust-version to match"
+         among production dependencies, transitive ones included ({max_dep:?}); \
+         update Cargo.toml's rust-version to match"
     );
 }
 
