@@ -29,12 +29,29 @@ const SETTINGS_SECTIONS: &[SettingsSection] = &[
 ];
 
 /// Top-level settings view — full window swap.
+///
+/// Kept as a `Stack` with the base layout always at child 0, mirroring
+/// `view_main`'s #112 pattern: flipping the root between a plain container
+/// (menu closed) and a stack (menu open) would make iced discard every
+/// descendant's positional state on open/close, snapping the settings
+/// scrollable back to the top. Pushing/popping the sort-menu overlay as
+/// child 1 instead leaves the base subtree's diff untouched.
 pub fn view_settings(state: &HonkHonk, t: Theme) -> Element<'_, Message> {
     let header = settings_header(t);
     let sidebar = settings_sidebar(state, t);
     let content = settings_content(state, t);
     let body = row![sidebar, content].height(Length::Fill);
-    column![header, body]
+    let base: Element<'_, Message> = column![header, body]
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into();
+
+    let mut layers: Vec<Element<'_, Message>> = vec![base];
+    if let Some(sort_menu) = state.view_hotkey_sort_overlay(t) {
+        layers.push(sort_menu);
+    }
+
+    iced::widget::Stack::with_children(layers)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()

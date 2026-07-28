@@ -41,6 +41,28 @@ fn sort_chip_selects_and_persists_name() {
 }
 
 #[test]
+fn hotkey_sort_menu_overlay_renders_over_the_settings_view() {
+    let _guard = serialize_gui_test();
+    let mut harness = GuiHarness::new();
+    harness.click("Settings");
+    harness.click("Hotkeys");
+
+    assert!(
+        !harness.find("  Name"),
+        "sort menu should be closed until the sort chip is clicked"
+    );
+
+    harness.click("Sort: Slot");
+
+    assert!(
+        harness.find("✓ Slot"),
+        "opening the Shortcuts sort chip should stack the sort-menu overlay \
+         over the settings view (#199 task 8)"
+    );
+    assert!(harness.find("  Name"));
+}
+
+#[test]
 fn staged_settings_search_filters_highlights_and_restores() {
     let _guard = serialize_gui_test();
     let mut harness = GuiHarness::new();

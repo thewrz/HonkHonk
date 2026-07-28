@@ -5,10 +5,6 @@ use crate::app::{HonkHonk, Message, SettingsSection};
 use crate::ui::list_controls::sort;
 use crate::ui::theme::Theme;
 
-#[allow(
-    dead_code,
-    reason = "wired into ui/settings/mod.rs's Stack-compose overlay layer by a follow-up task in this issue's task chain (#199)"
-)]
 impl HonkHonk {
     /// Sort-menu overlay for the Settings → Shortcuts sort chip. Reuses the
     /// same `sort_menu_anchor` field as the tiles view's sort menu, so it is
