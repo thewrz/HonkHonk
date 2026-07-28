@@ -6,10 +6,6 @@
 //! longer exists. `build_hotkey_rows` resolves each of those cases into an
 //! owned, always-displayable [`HotkeyRow`]; `HonkHonk::hotkey_rows()` (in the
 //! parent module) filters and sorts the result.
-#![allow(
-    dead_code,
-    reason = "row-building surface for #199; wired into the Settings → Shortcuts view by follow-up tasks in this issue's task chain"
-)]
 
 use std::cmp::Ordering;
 use std::path::Path;

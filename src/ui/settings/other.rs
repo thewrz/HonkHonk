@@ -1,6 +1,6 @@
 use iced::{
-    Alignment, Element, Length,
-    widget::{Column, column, container, row, text},
+    Element,
+    widget::{column, container, text},
 };
 
 use super::common::section_layout;
@@ -10,110 +10,6 @@ use crate::settings::{SETTINGS_REGISTRY, SettingCategory};
 use crate::ui::theme::{self, Hh, Theme};
 
 const LICENSE: &str = env!("CARGO_PKG_LICENSE");
-
-pub(super) fn view_hotkeys_section<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
-    use crate::shortcuts::ShortcutsStatus;
-
-    let (dot_color, status_text) = match &state.shortcuts_status {
-        ShortcutsStatus::Active => (t.good(), "Global shortcuts active"),
-        ShortcutsStatus::Initializing => (t.ink_dim(), "Connecting to portal…"),
-        ShortcutsStatus::Unavailable(_) => (t.accent(), "Portal unavailable"),
-    };
-    let dot = container(iced::widget::Space::new())
-        .width(theme::space::SM)
-        .height(theme::space::SM)
-        .style(move |_t| container::Style {
-            background: Some(theme::bg_color(dot_color)),
-            border: iced::Border {
-                radius: iced::border::Radius::from(4.0),
-                ..Default::default()
-            },
-            ..Default::default()
-        });
-    let portal_badge = container(
-        row![
-            dot,
-            text(status_text)
-                .size(theme::font::LABEL)
-                .color(t.ink())
-                .font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..Default::default()
-                }),
-        ]
-        .spacing(theme::space::SM)
-        .align_y(Alignment::Center),
-    )
-    .padding(theme::space::MD)
-    .style(move |_t| container::Style {
-        background: Some(theme::bg_color(t.panel())),
-        border: iced::Border {
-            color: t.hairline(),
-            width: 1.0,
-            radius: theme::radius::MD,
-        },
-        ..Default::default()
-    });
-
-    section_layout(
-        "Hotkeys",
-        "Global shortcuts that work even when HonkHonk isn't focused.",
-        column![portal_badge, hotkey_bindings(state, t)]
-            .spacing(theme::space::LG)
-            .into(),
-        t,
-    )
-}
-
-fn hotkey_bindings<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
-    let bound = state
-        .slot_triggers
-        .iter()
-        .enumerate()
-        .filter_map(|(index, trigger)| trigger.as_deref().map(|value| (index, value)));
-    let rows: Vec<Element<'_, Message>> = bound
-        .map(|(index, trigger)| {
-            container(
-                row![
-                    text(format!("Slot {}", index + 1))
-                        .size(theme::font::LABEL)
-                        .color(t.ink_dim())
-                        .width(Length::Fixed(60.0)),
-                    text(trigger)
-                        .size(theme::font::LABEL)
-                        .color(t.ink())
-                        .font(iced::Font {
-                            family: iced::font::Family::Monospace,
-                            weight: iced::font::Weight::Bold,
-                            ..Default::default()
-                        }),
-                ]
-                .spacing(theme::space::MD)
-                .align_y(Alignment::Center),
-            )
-            .padding([6.0, 12.0])
-            .style(move |_t| container::Style {
-                background: Some(theme::bg_color(t.panel())),
-                border: iced::Border {
-                    color: t.hairline(),
-                    width: 1.0,
-                    radius: theme::radius::MD,
-                },
-                ..Default::default()
-            })
-            .into()
-        })
-        .collect();
-
-    if rows.is_empty() {
-        text("No hotkeys assigned yet. Use the Slot Manager to bind sounds.")
-            .size(theme::font::LABEL)
-            .color(t.ink_dim())
-            .into()
-    } else {
-        Column::with_children(rows).spacing(theme::space::XS).into()
-    }
-}
 
 pub(super) fn view_appearance_section<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
     let registry_rows = SETTINGS_REGISTRY

@@ -58,10 +58,6 @@ pub(super) fn hotkey_sort_from_config(config: &AppConfig) -> HotkeySortState {
     HotkeySortState::new(key, direction)
 }
 
-#[allow(
-    dead_code,
-    reason = "query surface for #199; wired into the Settings → Shortcuts view by follow-up tasks in this issue's task chain"
-)]
 impl HonkHonk {
     /// Bound shortcut rows, filtered by the shared query and sorted by the
     /// active `SlotSortKey` — the acceptance-criterion query surface for

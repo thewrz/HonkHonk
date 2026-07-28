@@ -1,6 +1,7 @@
 mod audio;
 mod common;
 mod controls;
+mod hotkeys;
 mod library;
 mod other;
 mod scroll;
@@ -168,7 +169,7 @@ fn settings_content<'a>(state: &'a HonkHonk, t: Theme) -> Element<'a, Message> {
         match state.settings_ui.section() {
             SettingsSection::Audio => audio::view_audio_section(state, t),
             SettingsSection::Library => library::view_library_section(state, t),
-            SettingsSection::Hotkeys => other::view_hotkeys_section(state, t),
+            SettingsSection::Hotkeys => hotkeys::view_hotkeys_section(state, t),
             SettingsSection::Appearance => other::view_appearance_section(state, t),
             SettingsSection::About => other::view_about_section(t),
         }

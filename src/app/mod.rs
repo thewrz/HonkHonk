@@ -45,10 +45,6 @@ mod sound_metadata;
 /// Bridges `HotkeyRow` across the module-tree boundary between `crate::app`
 /// (which owns the state it's built from) and `crate::ui::settings::hotkeys`
 /// (a sibling tree that renders it) — see `hotkeys.rs`'s module doc.
-#[allow(
-    unused_imports,
-    reason = "cross-module-tree bridge for #199; consumed by ui/settings/hotkeys.rs in a follow-up task"
-)]
 pub(crate) use hotkeys::HotkeyRow;
 pub use settings::SettingsMessage;
 
