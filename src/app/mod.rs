@@ -102,6 +102,13 @@ pub enum Message {
     ToggleSoundSortDirection,
     SelectSoundSort(&'static str),
     DismissSoundSortMenu,
+    // Settings → Shortcuts list controls (#199): filter query and sort chip,
+    // independent of the tiles view's messages above.
+    HotkeySearchChanged(String),
+    ToggleHotkeySortMenu,
+    ToggleHotkeySortDirection,
+    SelectHotkeySort(&'static str),
+    DismissHotkeySortMenu,
     /// Seeds the active filter from an otherwise-unhandled printable keypress.
     TypeToFilter(String),
     /// Routes an uncaptured Escape through overlay and filter staging.
@@ -915,6 +922,26 @@ impl HonkHonk {
             }
             Message::DismissSoundSortMenu => {
                 self.dismiss_sound_sort_menu();
+                Task::none()
+            }
+            Message::HotkeySearchChanged(query) => {
+                self.replace_hotkey_filter_query(query);
+                Task::none()
+            }
+            Message::ToggleHotkeySortMenu => {
+                self.toggle_hotkey_sort_menu();
+                Task::none()
+            }
+            Message::ToggleHotkeySortDirection => {
+                self.toggle_hotkey_sort_direction();
+                Task::none()
+            }
+            Message::SelectHotkeySort(key) => {
+                self.select_hotkey_sort(key);
+                Task::none()
+            }
+            Message::DismissHotkeySortMenu => {
+                self.dismiss_hotkey_sort_menu();
                 Task::none()
             }
             Message::VolumeChanged(v) => {

@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
+use crate::app::Message;
 use crate::state::{AudioFormat, Macro, SortPref, SoundEntry};
 
 fn sound(id: &str, name: &str, path: &str, category: &str) -> SoundEntry {
@@ -211,4 +212,65 @@ fn accessors_mirror_the_underlying_filter_and_sort_state() {
         app.hotkey_sort_state(),
         HotkeySortState::new(SlotSortKey::Added, Direction::Descending)
     );
+}
+
+/// Message-driven round trip pinned at the boundary: selecting a sort key
+/// and flipping direction through `Message` must both land in
+/// `hotkey_sort` and persist to `config.sort_prefs["shortcuts"]` —
+/// mirrors `app_selection_and_direction_changes_update_persisted_preference`
+/// for the tiles view.
+#[test]
+fn message_driven_selection_and_direction_changes_persist_under_shortcuts_key() {
+    let mut app = HonkHonk::new_for_test();
+
+    let _ = app.update(Message::SelectHotkeySort("tag"));
+    let _ = app.update(Message::ToggleHotkeySortDirection);
+
+    assert_eq!(
+        app.hotkey_sort,
+        HotkeySortState::new(SlotSortKey::Tag, Direction::Descending)
+    );
+    assert_eq!(
+        app.config.sort_prefs.get(HOTKEYS_VIEW_KEY),
+        Some(&SortPref::new("tag", "descending"))
+    );
+}
+
+#[test]
+fn message_driven_menu_open_captures_anchor_and_dismiss_does_not_change_sort() {
+    let mut app = HonkHonk::new_for_test();
+    app.cursor_pos = iced::Point::new(420.0, 64.0);
+    let original = app.hotkey_sort;
+
+    let _ = app.update(Message::ToggleHotkeySortMenu);
+    assert_eq!(app.sort_menu_anchor, Some(iced::Point::new(420.0, 64.0)));
+
+    let _ = app.update(Message::DismissHotkeySortMenu);
+    assert!(app.sort_menu_anchor.is_none());
+    assert_eq!(app.hotkey_sort, original);
+    assert!(app.config.sort_prefs.is_empty());
+}
+
+#[test]
+fn message_driven_unknown_selection_closes_menu_without_changing_preference() {
+    let mut app = HonkHonk::new_for_test();
+    let _ = app.update(Message::ToggleHotkeySortMenu);
+
+    let _ = app.update(Message::SelectHotkeySort("future"));
+
+    assert!(app.sort_menu_anchor.is_none());
+    assert_eq!(app.hotkey_sort, default_hotkey_sort());
+    assert!(app.config.sort_prefs.is_empty());
+}
+
+/// The filter query is transient like the tiles view's: it lands in
+/// `hotkey_filter` but is never written to `config.sort_prefs`.
+#[test]
+fn message_driven_filter_query_replaces_state_without_persisting() {
+    let mut app = HonkHonk::new_for_test();
+
+    let _ = app.update(Message::HotkeySearchChanged("goose".into()));
+
+    assert_eq!(app.hotkey_filter_query(), "goose");
+    assert!(app.config.sort_prefs.is_empty());
 }

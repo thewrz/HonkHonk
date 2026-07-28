@@ -3,7 +3,7 @@
 
 use super::HonkHonk;
 use crate::app::slot_sort::SlotSortKey;
-use crate::state::AppConfig;
+use crate::state::{AppConfig, SortPref};
 use crate::ui::list_controls::filter::filter_items;
 use crate::ui::list_controls::sort::{Direction, SortState};
 
@@ -87,5 +87,64 @@ impl HonkHonk {
     /// Mirrors the above for the active sort state.
     pub(crate) fn hotkey_sort_state(&self) -> HotkeySortState {
         self.hotkey_sort
+    }
+}
+
+/// Message-driven mutators for the Settings → Shortcuts filter/sort chip
+/// (#199). Wired directly into `update()` — unlike the query surface above,
+/// these are reachable from production code today, so they carry no
+/// `dead_code` allowance.
+impl HonkHonk {
+    /// Opens or closes the shared sort-menu overlay for the Shortcuts sort
+    /// chip. Reuses `sort_menu_anchor`, the same field the tiles view's sort
+    /// menu uses — only one sort menu is ever open at a time, matching
+    /// `toggle_sound_sort_menu`.
+    pub(super) fn toggle_hotkey_sort_menu(&mut self) {
+        self.sort_menu_anchor = if self.sort_menu_anchor.is_some() {
+            None
+        } else {
+            Some(self.cursor_pos)
+        };
+    }
+
+    pub(super) fn toggle_hotkey_sort_direction(&mut self) {
+        self.hotkey_sort.toggle_direction();
+        self.persist_hotkey_sort();
+    }
+
+    /// An unknown id (e.g. a persisted value from a newer build reading an
+    /// older config) closes the menu without changing the active sort,
+    /// matching `select_sound_sort`.
+    pub(super) fn select_hotkey_sort(&mut self, key_id: &str) {
+        let Some(key) = slot_sort_key_from_id(key_id) else {
+            self.sort_menu_anchor = None;
+            return;
+        };
+        self.hotkey_sort.select(key);
+        self.sort_menu_anchor = None;
+        self.persist_hotkey_sort();
+    }
+
+    pub(super) fn dismiss_hotkey_sort_menu(&mut self) -> bool {
+        self.sort_menu_anchor.take().is_some()
+    }
+
+    fn persist_hotkey_sort(&mut self) {
+        self.config.sort_prefs.insert(
+            HOTKEYS_VIEW_KEY.into(),
+            SortPref::new(
+                self.hotkey_sort.key().id(),
+                self.hotkey_sort.direction().id(),
+            ),
+        );
+        self.persist_config();
+    }
+
+    /// Transient, like the tiles view's filter query: never written to
+    /// `config.sort_prefs`. Mirrors `replace_filter_query`, minus the
+    /// cache-invalidation call — `hotkey_rows()` is pure and rebuilds from
+    /// current state on every call, so there is nothing to refresh.
+    pub(super) fn replace_hotkey_filter_query(&mut self, query: String) {
+        self.hotkey_filter.replace(query);
     }
 }
