@@ -12,6 +12,26 @@ use iced::Task;
 use super::{HonkHonk, Message};
 use crate::state::SlotContent;
 
+/// Test-only spy for [`HonkHonk::persist_slots`]: incremented unconditionally,
+/// ahead of the `self.persist` gate, so a test can prove a slot mutation
+/// actually reached the persist call. `HonkHonk::new_for_test()` hardcodes
+/// `persist: false` (see `mod.rs`) so `cargo test` never touches the real
+/// XDG config dir — which also makes the real disk write a guaranteed no-op
+/// and leaves the call itself unobservable without this spy (#169 review).
+/// Compiled only under `cfg(test)`; zero footprint on release builds.
+#[cfg(test)]
+static PERSIST_SLOTS_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Current value of [`PERSIST_SLOTS_CALLS`]. Assertions must compare a
+/// before/after delta (`after > before`), never an absolute value: the
+/// counter is process-wide and other tests running in parallel also bump it,
+/// but — being monotonic and only ever incremented — can never make a test's
+/// own call disappear from the delta.
+#[cfg(test)]
+pub(crate) fn persist_slots_call_count() -> u32 {
+    PERSIST_SLOTS_CALLS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 impl HonkHonk {
     /// A shortcut (or the slot manager) fired slot `idx`. Resolves the slot's
     /// content and dispatches: a missing slot is a no-op, a sound plays via
@@ -75,6 +95,20 @@ impl HonkHonk {
             }
         }
         Task::none()
+    }
+
+    /// Persists the slot map under the same persistence switch as the config.
+    /// Colocated here with its two slot-mutation call sites above
+    /// (`clear_stale_slot`, `assign_macro_slot`); also called from
+    /// `mod.rs`'s `AssignSlot`/`ClearSlot` message arms.
+    pub(super) fn persist_slots(&self) {
+        #[cfg(test)]
+        PERSIST_SLOTS_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.persist {
+            if let Err(e) = self.slots.save() {
+                tracing::warn!(error = %e, "slots save error");
+            }
+        }
     }
 }
 

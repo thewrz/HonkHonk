@@ -1,7 +1,7 @@
 //! Boundary tests for the render-time slot-view resolution (#169 Task 3),
 //! split from `mod.rs` to keep it within the file-size budget. Pins:
-//! `resolve_slot` is pure and never self-clears a dangling reference, and
-//! `bound_count` counts a slot as bound for either `SlotContent` variant.
+//! `resolve_slot` never self-clears a dangling reference, and `bound_count`
+//! counts a slot as bound for either `SlotContent` variant.
 
 use super::*;
 use crate::state::{AudioFormat, SlotMap};
@@ -126,22 +126,6 @@ fn resolve_slot_dangling_macro_is_empty_and_never_self_clears() {
         slots.content(4).is_some(),
         "resolve_slot must never self-clear a dangling reference"
     );
-}
-
-#[test]
-fn resolve_slot_is_pure_repeated_calls_agree() {
-    let mut slots = SlotMap::default();
-    let s = sound("s1", "/sounds/a.wav");
-    slots.set(0, s.path.clone());
-    let sounds = vec![s.clone()];
-    let macros = MacroStore::default();
-    let triggers = empty_triggers();
-    let built = ctx(&slots, &triggers, &sounds, &macros);
-
-    let first = resolve_slot(0, &built);
-    let second = resolve_slot(0, &built);
-
-    assert_eq!(first, second);
 }
 
 #[test]

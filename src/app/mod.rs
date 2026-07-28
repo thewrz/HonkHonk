@@ -1249,15 +1249,6 @@ impl HonkHonk {
         }
     }
 
-    /// Persists the slot map under the same persistence switch as the config.
-    fn persist_slots(&self) {
-        if self.persist {
-            if let Err(e) = self.slots.save() {
-                tracing::warn!(error = %e, "slots save error");
-            }
-        }
-    }
-
     fn view_category_chips(&self, t: theme::Theme) -> Element<'_, Message> {
         use std::collections::BTreeSet;
 

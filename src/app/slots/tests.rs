@@ -5,6 +5,7 @@
 //! (missing sound path, unknown macro id) self-clears without ever calling
 //! the play path.
 
+use super::persist_slots_call_count;
 use crate::app::{HonkHonk, Message};
 use crate::audio::CachedPcm;
 use crate::state::{AudioFormat, SoundEntry, Step};
@@ -111,6 +112,28 @@ fn stale_sound_slot_self_clears_on_activation() {
     );
 }
 
+/// Pins the "clear and persist happen atomically" contract stated on
+/// `clear_stale_slot`'s doc comment. `new_for_test()` hardcodes
+/// `persist: false`, so the real disk write from `persist_slots` is a
+/// guaranteed no-op here — `persist_slots_call_count` observes the call
+/// itself, independent of that gate, so deleting the `self.persist_slots();`
+/// line from `clear_stale_slot` fails this test (#169 review).
+#[test]
+fn stale_sound_slot_clear_calls_persist_slots() {
+    let mut app = HonkHonk::new_for_test();
+    let missing = PathBuf::from("/gone/deleted.wav");
+    app.slots.set(4, missing);
+    let before = persist_slots_call_count();
+
+    let _ = app.update(Message::ShortcutActivated(4));
+
+    assert!(
+        persist_slots_call_count() > before,
+        "a stale sound slot's self-clear must call persist_slots so the \
+         clear is written back to slots.json"
+    );
+}
+
 #[test]
 fn macro_slot_activation_fires_play_macro() {
     let (mut app, id) = app_with_warm_macro();
@@ -165,6 +188,26 @@ fn stale_macro_slot_self_clears_without_calling_play_macro() {
     );
 }
 
+/// Macro counterpart of `stale_sound_slot_clear_calls_persist_slots`: the
+/// self-clear in `activate_macro_slot`'s stale branch must reach
+/// `persist_slots` too, not just `activate_sound_slot`'s.
+#[test]
+fn stale_macro_slot_clear_calls_persist_slots() {
+    let mut app = HonkHonk::new_for_test();
+    app.slots
+        .set_macro(8, "does-not-exist".to_string())
+        .unwrap();
+    let before = persist_slots_call_count();
+
+    let _ = app.update(Message::ShortcutActivated(8));
+
+    assert!(
+        persist_slots_call_count() > before,
+        "a stale macro slot's self-clear must call persist_slots so the \
+         clear is written back to slots.json"
+    );
+}
+
 #[test]
 fn macro_activation_replaces_a_running_macro_via_play_macro() {
     // Proves activate_macro_slot dispatches through the real play_macro path
@@ -193,6 +236,23 @@ fn assign_macro_slot_with_valid_id_persists_the_assignment() {
     let _ = app.update(Message::AssignMacroSlot(9, id.clone()));
 
     assert_eq!(app.slots().macro_id(9), Some(id.as_str()));
+}
+
+/// Pins the `Ok(()) => self.persist_slots()` arm of `assign_macro_slot`
+/// directly: a successful assignment must call `persist_slots`, independent
+/// of the `self.persist` gate that `new_for_test()` disables (#169 review).
+#[test]
+fn assign_macro_slot_with_valid_id_calls_persist_slots() {
+    let mut app = HonkHonk::new_for_test();
+    let id = app.macros.add("valid").id.clone();
+    let before = persist_slots_call_count();
+
+    let _ = app.update(Message::AssignMacroSlot(9, id));
+
+    assert!(
+        persist_slots_call_count() > before,
+        "a successful macro-slot assignment must call persist_slots"
+    );
 }
 
 #[test]
