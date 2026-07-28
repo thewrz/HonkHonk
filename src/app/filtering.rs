@@ -89,7 +89,7 @@ impl HonkHonk {
             Some(FilterTarget::Tiles) => self.insert_tiles_filter_text(text),
             Some(FilterTarget::Hotkeys) => {
                 self.hotkey_filter.insert(text);
-                iced::Task::none()
+                iced::widget::operation::focus(search_bar::hotkeys_input_id())
             }
             None => iced::Task::none(),
         }

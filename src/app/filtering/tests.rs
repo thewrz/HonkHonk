@@ -141,6 +141,31 @@ fn typed_filter_text_routes_to_hotkeys_when_shortcuts_section_is_active() {
     );
 }
 
+/// Type-to-filter must *focus* the input it seeds, not merely update the
+/// query: `FilterState`'s activation contract is "focus and seed the filter
+/// input". Without the focus task the list filters, but Backspace, Delete,
+/// and arrow keys keep going to whatever widget was focused before typing
+/// began — the query becomes uneditable.
+#[test]
+fn typed_filter_text_focuses_the_targeted_search_input() {
+    let mut tiles = HonkHonk::new_for_test();
+    tiles.view_mode = ViewMode::Main;
+
+    assert!(
+        tiles.update(Message::TypeToFilter("h".into())).units() > 0,
+        "tiles type-to-filter must schedule a focus task"
+    );
+
+    let mut hotkeys = HonkHonk::new_for_test();
+    hotkeys.view_mode = ViewMode::Settings;
+    hotkeys.settings_ui.select_section(SettingsSection::Hotkeys);
+
+    assert!(
+        hotkeys.update(Message::TypeToFilter("h".into())).units() > 0,
+        "hotkeys type-to-filter must schedule a focus task, like the tiles path"
+    );
+}
+
 #[test]
 fn staged_settings_search_blocks_hotkeys_type_to_filter() {
     let mut app = HonkHonk::new_for_test();
