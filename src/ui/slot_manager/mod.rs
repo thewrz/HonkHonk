@@ -1,6 +1,7 @@
 use iced::widget::{Column, Row, Space, button, column, container, row, scrollable, text};
 use iced::{Element, Length};
 
+mod controls;
 mod empty;
 mod macro_slot;
 mod sound;
@@ -55,6 +56,20 @@ fn resolve_slot<'a>(idx: u8, ctx: &SlotManagerCtx<'a>) -> SlotView<'a> {
 /// undercounted.
 fn bound_count(slots: &SlotMap) -> usize {
     (0u8..20).filter(|&i| slots.content(i).is_some()).count()
+}
+
+/// A macro's label for display. `MacroStore::add`/`rename` accept a blank or
+/// whitespace-only name, which would otherwise render as an invisible label
+/// — indistinguishable from every other unnamed macro. Every surface that
+/// shows a macro name goes through here so the assignment list, the slot
+/// tile and the sidebar agree on what an unnamed macro is called (#169
+/// review).
+pub(super) fn display_name(macro_def: &Macro) -> &str {
+    if macro_def.name.trim().is_empty() {
+        "Untitled macro"
+    } else {
+        &macro_def.name
+    }
 }
 
 pub(super) fn tone_for(sound: &SoundEntry) -> Tone {
@@ -200,12 +215,18 @@ fn sidebar<'a>(ctx: SlotManagerCtx<'a>, t: Theme) -> Element<'a, Message> {
                 SlotView::Sound(s) => {
                     sound::sidebar_bound(idx, s, trigger, ctx.configure_available, t)
                 }
-                SlotView::Macro(m) => macro_slot::sidebar_bound(idx, m, trigger, t),
+                SlotView::Macro(m) => {
+                    macro_slot::sidebar_bound(idx, m, trigger, ctx.configure_available, t)
+                }
                 SlotView::Empty => empty::sidebar_empty(idx, ctx.macros, t),
             }
         }
     };
-    container(inner)
+    // Scrollable because the sidebar's height is fixed to the window but its
+    // content is not: an empty slot lists one assign button per stored macro,
+    // and a short window clips even a bound slot's controls. Without this the
+    // trailing entries are unreachable (#169 review).
+    container(scrollable(inner).width(Length::Fill).height(Length::Fill))
         .width(320)
         .height(Length::Fill)
         .padding(theme::space::LG)

@@ -9,6 +9,8 @@ use crate::app::Message;
 use crate::state::Macro;
 use crate::ui::theme::{self, Hh, Theme};
 
+use super::{controls, display_name};
+
 fn macro_badge<'a>(t: Theme) -> Element<'a, Message> {
     container(
         text("MACRO")
@@ -53,7 +55,7 @@ pub(super) fn tile<'a>(
                 .size(theme::font::LABEL)
                 .color(t.ink_faint()),
             macro_badge(t),
-            text(macro_def.name.clone())
+            text(display_name(macro_def))
                 .size(theme::font::LABEL)
                 .color(t.ink()),
             text(trigger.unwrap_or("no hotkey"))
@@ -80,7 +82,7 @@ fn macro_summary<'a>(macro_def: &'a Macro, t: Theme) -> Element<'a, Message> {
     row![
         macro_badge(t),
         column![
-            text(macro_def.name.clone())
+            text(display_name(macro_def))
                 .size(theme::font::BODY)
                 .color(t.ink()),
             text(format!("{} step(s)", macro_def.steps.len()))
@@ -94,50 +96,15 @@ fn macro_summary<'a>(macro_def: &'a Macro, t: Theme) -> Element<'a, Message> {
     .into()
 }
 
-fn hotkey_display<'a>(trigger: Option<&'a str>, t: Theme) -> Element<'a, Message> {
-    container(
-        text(trigger.unwrap_or("—"))
-            .size(theme::font::BODY)
-            .color(t.ink()),
-    )
-    .padding([theme::space::SM, theme::space::MD])
-    .width(Length::Fill)
-    .style(move |_t| container::Style {
-        border: iced::Border {
-            color: t.accent(),
-            width: 1.5,
-            radius: 10.0.into(),
-        },
-        ..Default::default()
-    })
-    .into()
-}
-
-fn unbind_button<'a>(idx: u8) -> Element<'a, Message> {
-    button(
-        text("Unbind")
-            .size(theme::font::LABEL)
-            .color(iced::Color::from_rgb(0.86, 0.15, 0.15)),
-    )
-    .on_press(Message::ClearSlot(idx))
-    .width(Length::Fill)
-    .style(move |_t, _s| button::Style {
-        background: None,
-        text_color: iced::Color::from_rgb(0.86, 0.15, 0.15),
-        border: iced::Border {
-            color: iced::Color::from_rgba(0.86, 0.15, 0.15, 0.4),
-            width: 1.0,
-            radius: 10.0.into(),
-        },
-        ..Default::default()
-    })
-    .into()
-}
-
+/// Mirrors `sound::sidebar_bound`'s control order exactly — a macro slot's
+/// hotkey is configured the same app-global way a sound slot's is, so it
+/// gets the same hotkey readout, configure affordance and portal status
+/// (#169 review).
 pub(super) fn sidebar_bound<'a>(
     idx: u8,
     macro_def: &'a Macro,
     trigger: Option<&'a str>,
+    configure_available: bool,
     t: Theme,
 ) -> Element<'a, Message> {
     let slot_label = text(format!("SLOT #{:02}", idx + 1))
@@ -149,8 +116,13 @@ pub(super) fn sidebar_bound<'a>(
         text("GLOBAL HOTKEY")
             .size(theme::font::LABEL)
             .color(t.ink_dim()),
-        hotkey_display(trigger, t),
-        unbind_button(idx),
+        controls::hotkey_display(trigger, t),
+        controls::configure_row(configure_available, t),
+        text("PORTAL STATUS")
+            .size(theme::font::LABEL)
+            .color(t.ink_dim()),
+        controls::portal_status(t),
+        controls::unbind_button(idx),
     ]
     .spacing(theme::space::MD)
     .into()

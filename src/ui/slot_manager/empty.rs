@@ -5,6 +5,8 @@ use crate::app::Message;
 use crate::state::MacroStore;
 use crate::ui::theme::{self, Hh, Theme};
 
+use super::display_name;
+
 pub(super) fn empty_tile<'a>(idx: u8, selected: bool, t: Theme) -> Element<'a, Message> {
     let border = if selected {
         iced::Border {
@@ -92,21 +94,20 @@ fn macro_assign_list<'a>(idx: u8, macros: &'a MacroStore, t: Theme) -> Element<'
         .size(theme::font::LABEL)
         .color(t.ink_dim());
     let buttons = entries.fold(column![].spacing(theme::space::SM), |col, m| {
-        let label = if m.name.trim().is_empty() {
-            "Untitled macro".to_owned()
-        } else {
-            m.name.clone()
-        };
         col.push(
-            button(text(label).size(theme::font::LABEL).color(t.ink()))
-                .on_press(Message::AssignMacroSlot(idx, m.id.clone()))
-                .width(Length::Fill)
-                .style(move |_t, _s| button::Style {
-                    background: Some(theme::bg_color(t.panel())),
-                    text_color: t.ink(),
-                    border: theme::tile_border(t.hairline(), 1.0),
-                    ..Default::default()
-                }),
+            button(
+                text(display_name(m))
+                    .size(theme::font::LABEL)
+                    .color(t.ink()),
+            )
+            .on_press(Message::AssignMacroSlot(idx, m.id.clone()))
+            .width(Length::Fill)
+            .style(move |_t, _s| button::Style {
+                background: Some(theme::bg_color(t.panel())),
+                text_color: t.ink(),
+                border: theme::tile_border(t.hairline(), 1.0),
+                ..Default::default()
+            }),
         )
     });
     column![heading, buttons].spacing(theme::space::SM).into()

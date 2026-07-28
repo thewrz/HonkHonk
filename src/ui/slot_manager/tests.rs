@@ -128,6 +128,21 @@ fn resolve_slot_dangling_macro_is_empty_and_never_self_clears() {
     );
 }
 
+/// `MacroStore::add`/`rename` accept blank and whitespace-only names, so
+/// every macro-name surface must share one fallback or an unnamed macro
+/// renders as an invisible label on the tile and sidebar while the
+/// assignment list still shows it as "Untitled macro" (#169 review).
+#[test]
+fn display_name_falls_back_for_blank_and_whitespace_names() {
+    assert_eq!(display_name(&macro_def("m1", "")), "Untitled macro");
+    assert_eq!(display_name(&macro_def("m2", "   \t ")), "Untitled macro");
+}
+
+#[test]
+fn display_name_keeps_a_real_name_verbatim() {
+    assert_eq!(display_name(&macro_def("m1", "Honk combo")), "Honk combo");
+}
+
 #[test]
 fn bound_count_counts_sound_and_macro_slots() {
     let mut slots = SlotMap::default();
