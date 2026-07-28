@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Adam Wrzeski -->
 <component type="desktop-application">
   <id>io.github.wrzonance.HonkHonk</id>
   <name>HonkHonk</name>
@@ -19,6 +20,19 @@
   </description>
 
   <launchable type="desktop-id">io.github.wrzonance.HonkHonk.desktop</launchable>
+
+  <!-- Rename migration (#207): 0.1.0 and v0.1.0-alpha.1 shipped a Flatpak
+       bundle under io.github.thewrz.HonkHonk. Declaring the old ID lets
+       software centres treat this as the same application and upgrade in
+       place instead of offering it as a second, parallel install. These are
+       the ONLY sanctioned occurrences of the old ID in the tree — see
+       tests/packaging/flatpak_identity_sweep.sh. -->
+  <provides>
+    <id>io.github.thewrz.HonkHonk</id>
+  </provides>
+  <replaces>
+    <id>io.github.thewrz.HonkHonk</id>
+  </replaces>
 
   <url type="homepage">https://github.com/wrzonance/HonkHonk</url>
   <url type="bugtracker">https://github.com/wrzonance/HonkHonk/issues</url>
