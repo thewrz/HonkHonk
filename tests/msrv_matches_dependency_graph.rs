@@ -53,9 +53,9 @@ fn declared_rust_version() -> Version {
 }
 
 /// Runs `cargo metadata` and returns the declared `rust_version` of every
-/// production (non-dev, non-build) dependency reachable from the root,
-/// skipping dependencies that don't declare one at all.
-fn production_dependency_versions() -> Vec<Version> {
+/// compiled (non-dev) dependency reachable from the root, skipping
+/// dependencies that don't declare one at all.
+fn compiled_dependency_versions() -> Vec<Version> {
     let metadata = run_cargo_metadata();
     let packages = metadata["packages"]
         .as_array()
@@ -67,17 +67,17 @@ fn production_dependency_versions() -> Vec<Version> {
         .as_array()
         .expect("metadata.resolve.nodes must be an array");
 
-    reachable_production_packages(root_id, nodes)
+    reachable_compiled_packages(root_id, nodes)
         .into_iter()
         .filter_map(|pkg_id| rust_version_of(pkg_id, packages))
         .collect()
 }
 
-/// Breadth-first walk of `resolve.nodes` from the root, following only normal
-/// dependency edges. Stopping at the root's own edges would miss the crates
+/// Breadth-first walk of `resolve.nodes` from the root across every edge
+/// Cargo compiles. Stopping at the root's own edges would miss the crates
 /// that actually bind the floor, since a direct dependency can declare a low
 /// `rust_version` for itself while depending on something far newer.
-fn reachable_production_packages<'a>(root_id: &'a str, nodes: &'a [Value]) -> Vec<&'a str> {
+fn reachable_compiled_packages<'a>(root_id: &'a str, nodes: &'a [Value]) -> Vec<&'a str> {
     let by_id: HashMap<&str, &Value> = nodes
         .iter()
         .filter_map(|node| node["id"].as_str().map(|id| (id, node)))
@@ -93,7 +93,7 @@ fn reachable_production_packages<'a>(root_id: &'a str, nodes: &'a [Value]) -> Ve
             let Some(pkg) = dep["pkg"].as_str() else {
                 continue;
             };
-            if is_normal_dependency(dep) && seen.insert(pkg) {
+            if is_compiled_dependency(dep) && seen.insert(pkg) {
                 reachable.push(pkg);
                 queue.push_back(pkg);
             }
@@ -155,13 +155,17 @@ fn run_cargo_metadata() -> Value {
     serde_json::from_slice(&output.stdout).expect("cargo metadata must emit valid JSON")
 }
 
-/// A dependency is "normal" (production) when at least one of its
-/// `dep_kinds` entries has a `null` kind -- cargo's JSON encoding for the
-/// default (non-dev, non-build) dependency kind.
-fn is_normal_dependency(dep: &Value) -> bool {
-    dep["dep_kinds"]
-        .as_array()
-        .is_some_and(|kinds| kinds.iter().any(|kind| kind["kind"].is_null()))
+/// An edge counts when Cargo has to compile the crate on the other end of it
+/// for a plain `cargo build`: normal dependencies (`null` kind, cargo's JSON
+/// encoding for the default) and build dependencies, whose build scripts go
+/// through the same rustc and are held to the same floor. Dev-dependencies
+/// are excluded -- a consumer of this crate never builds them.
+fn is_compiled_dependency(dep: &Value) -> bool {
+    dep["dep_kinds"].as_array().is_some_and(|kinds| {
+        kinds
+            .iter()
+            .any(|kind| kind["kind"].is_null() || kind["kind"] == "build")
+    })
 }
 
 fn rust_version_of(pkg_id: &str, packages: &[Value]) -> Option<Version> {
@@ -170,20 +174,29 @@ fn rust_version_of(pkg_id: &str, packages: &[Value]) -> Option<Version> {
         .map(parse_version)
 }
 
+/// Equality, not `>=`, on purpose. `>=` alone would let the declared floor
+/// drift arbitrarily high and lock out users for no reason, and an inflated
+/// MSRV is invisible until someone tries the toolchain it excludes. The one
+/// case equality gets wrong is our own source requiring a newer compiler than
+/// every dependency does; the failure message names that case so nobody
+/// "fixes" a red test by declaring a floor the crate cannot build on.
 #[test]
-fn msrv_equals_max_production_dependency_rust_version() {
+fn msrv_equals_max_compiled_dependency_rust_version() {
     let declared = declared_rust_version();
-    let deps = production_dependency_versions();
+    let deps = compiled_dependency_versions();
     let max_dep = deps
         .into_iter()
         .max()
-        .expect("at least one production dependency must declare rust_version");
+        .expect("at least one compiled dependency must declare rust_version");
 
     assert_eq!(
         declared, max_dep,
         "package.rust-version ({declared:?}) must equal the highest rust_version \
-         among production dependencies, transitive ones included ({max_dep:?}); \
-         update Cargo.toml's rust-version to match"
+         among compiled dependencies, transitive ones included ({max_dep:?}). \
+         If {max_dep:?} is the real floor, update Cargo.toml to match. If our own \
+         source now needs a newer compiler than any dependency, raise \
+         rust-version to what the source needs and relax this assertion to \
+         `declared >= max_dep` -- never lower it below the source requirement"
     );
 }
 
