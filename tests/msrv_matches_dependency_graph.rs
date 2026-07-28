@@ -5,6 +5,9 @@
 //! dependency bump raises the real floor further, this test fails loudly
 //! instead of letting the crate keep advertising a floor it can no longer
 //! build on.
+//!
+//! The graph is resolved for the host platform only, so the suite still runs
+//! inside offline distro package builds (see `metadata_args`).
 
 use serde_json::Value;
 use std::process::Command;
@@ -42,9 +45,9 @@ fn declared_rust_version() -> Version {
     parse_version(value)
 }
 
-/// Runs `cargo metadata --offline` and returns the declared `rust_version`
-/// of every direct, production (non-dev, non-build) dependency, skipping
-/// dependencies that don't declare one at all.
+/// Runs `cargo metadata` and returns the declared `rust_version` of every
+/// direct, production (non-dev, non-build) dependency, skipping dependencies
+/// that don't declare one at all.
 fn direct_production_dependency_versions() -> Vec<Version> {
     let metadata = run_cargo_metadata();
     let packages = metadata["packages"]
@@ -70,10 +73,48 @@ fn direct_production_dependency_versions() -> Vec<Version> {
         .collect()
 }
 
+fn cargo_bin() -> String {
+    std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string())
+}
+
+/// Asks the same cargo that is driving this test which triple it builds for,
+/// so the metadata filter tracks the machine actually running the suite.
+fn host_triple(cargo: &str) -> String {
+    let output = Command::new(cargo)
+        .arg("-vV")
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run `{cargo} -vV`: {e}"));
+    assert!(
+        output.status.success(),
+        "`{cargo} -vV` failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix("host: "))
+        .unwrap_or_else(|| panic!("`{cargo} -vV` reported no host triple"))
+        .trim()
+        .to_string()
+}
+
+/// Cargo resolves for every platform by default, which makes it fetch crates
+/// that only exist for foreign targets (Android's `android-activity`, the
+/// Apple and Windows winit backends). Distro packagers prime their cache with
+/// `cargo fetch --target <host>` and then build with no network, so an
+/// unfiltered query aborts there. Pin the host triple to resolve exactly the
+/// subset the packager fetched.
+fn metadata_args(host: &str) -> Vec<String> {
+    ["metadata", "--format-version", "1", "--offline"]
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .chain(["--filter-platform".to_string(), host.to_string()])
+        .collect()
+}
+
 fn run_cargo_metadata() -> Value {
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
+    let cargo = cargo_bin();
     let output = Command::new(&cargo)
-        .args(["metadata", "--format-version", "1", "--offline"])
+        .args(metadata_args(&host_triple(&cargo)))
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .unwrap_or_else(|e| panic!("failed to run `{cargo} metadata`: {e}"));
@@ -115,4 +156,25 @@ fn msrv_equals_max_direct_production_dependency_rust_version() {
          among direct production dependencies ({max_dep:?}); update Cargo.toml's \
          rust-version to match"
     );
+}
+
+/// Regression guard: the AUR `honkhonk-git` build primes its cache with
+/// `cargo fetch --target <host>` and then runs `check()` with no network, so
+/// dropping the platform filter breaks packaging even though every developer
+/// machine — which has the foreign-target crates cached already — stays green.
+#[test]
+fn metadata_query_is_offline_and_pinned_to_the_host_platform() {
+    let host = host_triple(&cargo_bin());
+    assert!(host.contains('-'), "expected a target triple, got {host:?}");
+
+    let args = metadata_args(&host);
+    assert!(
+        args.iter().any(|arg| arg == "--offline"),
+        "the query must not reach the network: {args:?}"
+    );
+    let filter = args
+        .iter()
+        .position(|arg| arg == "--filter-platform")
+        .expect("the query must resolve one platform, not every platform");
+    assert_eq!(args.get(filter + 1), Some(&host));
 }
