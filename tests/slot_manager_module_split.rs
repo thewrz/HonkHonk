@@ -1,9 +1,10 @@
 //! Pins the structural invariants for the `src/ui/slot_manager` directory-module
-//! split (#169 Task 2 — mechanical split, no behavior change).
+//! split (#169 Task 2 mechanical split, extended by Task 3's content-kind file
+//! for macro slots).
 //!
 //! Two invariants are pinned here:
 //! 1. `slot_manager` is a directory module split by content-kind into the files
-//!    listed in `EXPECTED_FILES` (mod.rs, sound.rs, empty.rs for this task).
+//!    listed in `EXPECTED_FILES` (mod.rs, sound.rs, empty.rs, macro_slot.rs).
 //! 2. Every `.rs` file under that directory stays within the project's
 //!    400-line file cap (see CLAUDE.md "Project Overrides").
 //!
@@ -15,7 +16,7 @@ use std::fs;
 use std::path::Path;
 
 const MAX_LINES: usize = 400;
-const EXPECTED_FILES: &[&str] = &["mod.rs", "sound.rs", "empty.rs"];
+const EXPECTED_FILES: &[&str] = &["mod.rs", "sound.rs", "empty.rs", "macro_slot.rs"];
 
 fn slot_manager_dir() -> std::path::PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ui/slot_manager")

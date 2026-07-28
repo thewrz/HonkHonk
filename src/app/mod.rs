@@ -1574,6 +1574,7 @@ impl HonkHonk {
                         slots: &self.slots,
                         slot_triggers: &self.slot_triggers,
                         sounds: &self.sounds,
+                        macros: &self.macros,
                         selected_slot: self.selected_slot,
                         configure_available: self.shortcut_config.can_open(),
                     },
@@ -2317,6 +2318,19 @@ mod tests {
         let _ = app.update(Message::AssignSlot(3, path.clone()));
         let _ = app.update(Message::ClearSlot(3));
         assert!(app.slots().get(3).is_none());
+    }
+
+    /// `Message::ClearSlot` must behave identically regardless of which
+    /// `SlotContent` variant it clears — pinned as a macro-slot counterpart
+    /// to `clear_slot_removes_assignment` above (#169).
+    #[test]
+    fn clear_slot_removes_macro_assignment() {
+        let mut app = HonkHonk::new_for_test();
+        let id = app.macros.add("Honk combo").id.clone();
+        let _ = app.update(Message::AssignMacroSlot(3, id));
+        assert!(app.slots().content(3).is_some());
+        let _ = app.update(Message::ClearSlot(3));
+        assert!(app.slots().content(3).is_none());
     }
 
     #[test]

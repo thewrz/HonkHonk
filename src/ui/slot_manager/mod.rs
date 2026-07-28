@@ -2,10 +2,13 @@ use iced::widget::{Column, Row, Space, button, column, container, row, scrollabl
 use iced::{Element, Length};
 
 mod empty;
+mod macro_slot;
 mod sound;
+#[cfg(test)]
+mod tests;
 
 use crate::app::Message;
-use crate::state::{SlotMap, SoundEntry};
+use crate::state::{Macro, MacroStore, SlotContent, SlotMap, SoundEntry};
 use crate::ui::theme::{self, Hh, Theme, Tone};
 
 /// Bundles the shared slot-manager view state to stay under clippy's
@@ -15,9 +18,43 @@ pub struct SlotManagerCtx<'a> {
     pub slots: &'a SlotMap,
     pub slot_triggers: &'a [Option<String>; 20],
     pub sounds: &'a [SoundEntry],
+    pub macros: &'a MacroStore,
     pub selected_slot: Option<u8>,
     /// Whether portal v2 `configure_shortcuts()` is available on this DE/backend.
     pub configure_available: bool,
+}
+
+/// A slot's content resolved against the live sound/macro collections — the
+/// single render-time resolution point shared by the grid and the sidebar. A
+/// reference that no longer resolves (a deleted sound file, a removed macro)
+/// degrades to [`SlotView::Empty`]; resolution never mutates `ctx` and never
+/// self-clears the dangling reference (that only happens at activation time,
+/// in [`crate::app::slots`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SlotView<'a> {
+    Empty,
+    Sound(&'a SoundEntry),
+    Macro(&'a Macro),
+}
+
+/// Resolves slot `idx`'s content. Pure/read-only.
+fn resolve_slot<'a>(idx: u8, ctx: &SlotManagerCtx<'a>) -> SlotView<'a> {
+    match ctx.slots.content(idx) {
+        None => SlotView::Empty,
+        Some(SlotContent::Sound(path)) => ctx
+            .sounds
+            .iter()
+            .find(|s| &s.path == path)
+            .map_or(SlotView::Empty, SlotView::Sound),
+        Some(SlotContent::Macro(id)) => ctx.macros.get(id).map_or(SlotView::Empty, SlotView::Macro),
+    }
+}
+
+/// Counts slots holding either content kind — a sound or a macro. Must use
+/// `SlotMap::content`, not `SlotMap::get` (sound-only), or macro slots are
+/// undercounted.
+fn bound_count(slots: &SlotMap) -> usize {
+    (0u8..20).filter(|&i| slots.content(i).is_some()).count()
 }
 
 pub(super) fn tone_for(sound: &SoundEntry) -> Tone {
@@ -30,8 +67,7 @@ pub(super) fn tone_for(sound: &SoundEntry) -> Tone {
 }
 
 pub fn view_slot_manager<'a>(ctx: SlotManagerCtx<'a>, t: Theme) -> Element<'a, Message> {
-    let bound_count = (0u8..20).filter(|&i| ctx.slots.get(i).is_some()).count();
-    let header = slot_header(bound_count, t);
+    let header = slot_header(bound_count(ctx.slots), t);
     let divider = container(Space::new())
         .width(1)
         .height(Length::Fill)
@@ -39,13 +75,7 @@ pub fn view_slot_manager<'a>(ctx: SlotManagerCtx<'a>, t: Theme) -> Element<'a, M
             background: Some(theme::bg_color(t.hairline())),
             ..Default::default()
         });
-    let grid = slot_grid(
-        ctx.slots,
-        ctx.slot_triggers,
-        ctx.sounds,
-        ctx.selected_slot,
-        t,
-    );
+    let grid = slot_grid(ctx, t);
     let side = sidebar(ctx, t);
     let body = row![grid, divider, side].height(Length::Fill);
     container(column![header, body].height(Length::Fill))
@@ -100,22 +130,15 @@ fn slot_header<'a>(bound_count: usize, t: Theme) -> Element<'a, Message> {
     .into()
 }
 
-fn slot_grid<'a>(
-    slots: &'a SlotMap,
-    slot_triggers: &'a [Option<String>; 20],
-    sounds: &'a [SoundEntry],
-    selected_slot: Option<u8>,
-    t: Theme,
-) -> Element<'a, Message> {
+fn slot_grid<'a>(ctx: SlotManagerCtx<'a>, t: Theme) -> Element<'a, Message> {
     let rows: Vec<Element<'_, Message>> = (0u8..4)
         .map(|row_idx| {
             let tiles: Vec<Element<'_, Message>> = (0u8..5)
                 .map(|col_idx| {
                     let idx = row_idx * 5 + col_idx;
-                    let sound = slots
-                        .get(idx)
-                        .and_then(|p| sounds.iter().find(|s| &s.path == p));
-                    slot_tile(idx, sound, slot_triggers, selected_slot == Some(idx), t)
+                    let view = resolve_slot(idx, &ctx);
+                    let trigger = ctx.slot_triggers[idx as usize].as_deref();
+                    slot_tile(idx, view, trigger, ctx.selected_slot == Some(idx), t)
                 })
                 .collect();
             Row::with_children(tiles).spacing(theme::space::MD).into()
@@ -134,14 +157,15 @@ fn slot_grid<'a>(
 
 fn slot_tile<'a>(
     idx: u8,
-    sound: Option<&'a SoundEntry>,
-    slot_triggers: &'a [Option<String>; 20],
+    view: SlotView<'a>,
+    trigger: Option<&'a str>,
     selected: bool,
     t: Theme,
 ) -> Element<'a, Message> {
-    match sound {
-        Some(s) => sound::bound_tile(idx, s, slot_triggers[idx as usize].as_deref(), selected, t),
-        None => empty::empty_tile(idx, selected, t),
+    match view {
+        SlotView::Sound(s) => sound::bound_tile(idx, s, trigger, selected, t),
+        SlotView::Macro(m) => macro_slot::tile(idx, m, trigger, selected, t),
+        SlotView::Empty => empty::empty_tile(idx, selected, t),
     }
 }
 
@@ -168,19 +192,16 @@ fn sidebar<'a>(ctx: SlotManagerCtx<'a>, t: Theme) -> Element<'a, Message> {
             .color(t.ink_faint())
             .into(),
         Some(idx) => {
-            let sound = ctx
-                .slots
-                .get(idx)
-                .and_then(|p| ctx.sounds.iter().find(|s| &s.path == p));
-            match sound {
-                Some(s) => {
-                    let trigger = ctx
-                        .slot_triggers
-                        .get(idx as usize)
-                        .and_then(|t| t.as_deref());
+            let trigger = ctx
+                .slot_triggers
+                .get(idx as usize)
+                .and_then(|t| t.as_deref());
+            match resolve_slot(idx, &ctx) {
+                SlotView::Sound(s) => {
                     sound::sidebar_bound(idx, s, trigger, ctx.configure_available, t)
                 }
-                None => empty::sidebar_empty(idx, t),
+                SlotView::Macro(m) => macro_slot::sidebar_bound(idx, m, trigger, t),
+                SlotView::Empty => empty::sidebar_empty(idx, ctx.macros, t),
             }
         }
     };
