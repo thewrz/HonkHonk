@@ -5,7 +5,7 @@
 //! (missing sound path, unknown macro id) self-clears without ever calling
 //! the play path.
 
-use super::persist_slots_call_count;
+use super::{persist_slots_call_count, persist_slots_last_snapshot};
 use crate::app::{HonkHonk, Message};
 use crate::audio::CachedPcm;
 use crate::state::{AudioFormat, SoundEntry, Step};
@@ -118,6 +118,12 @@ fn stale_sound_slot_self_clears_on_activation() {
 /// guaranteed no-op here — `persist_slots_call_count` observes the call
 /// itself, independent of that gate, so deleting the `self.persist_slots();`
 /// line from `clear_stale_slot` fails this test (#169 review).
+///
+/// Also pins ordering, not just occurrence: `persist_slots_last_snapshot`
+/// captures `self.slots` from *inside* the persist call, so if
+/// `clear_stale_slot` ever persisted before mutating (or the two calls were
+/// reordered), the snapshot would still show slot 4 assigned and this test
+/// would fail even though a call did happen (#169 review).
 #[test]
 fn stale_sound_slot_clear_calls_persist_slots() {
     let mut app = HonkHonk::new_for_test();
@@ -131,6 +137,12 @@ fn stale_sound_slot_clear_calls_persist_slots() {
         persist_slots_call_count() > before,
         "a stale sound slot's self-clear must call persist_slots so the \
          clear is written back to slots.json"
+    );
+    let snapshot = persist_slots_last_snapshot().expect("persist_slots was called");
+    assert!(
+        snapshot.content(4).is_none(),
+        "the slot must already be cleared by the time persist_slots runs, \
+         not persisted first and cleared after"
     );
 }
 
@@ -255,11 +267,16 @@ fn assign_macro_slot_with_valid_id_calls_persist_slots() {
     );
 }
 
+/// Also pins the other half of the "persists if and only if `set_macro`
+/// returns `Ok`" invariant: the `Err` arm in `assign_macro_slot` must not
+/// call `persist_slots` at all, not merely leave the slot content unchanged
+/// (#169 review).
 #[test]
 fn assign_macro_slot_with_invalid_id_does_not_mutate() {
     let mut app = HonkHonk::new_for_test();
     let path = PathBuf::from("/s/keep.wav");
     app.slots.set(10, path.clone());
+    let before = persist_slots_call_count();
 
     // Empty macro id fails MacroIdError::Empty validation.
     let _ = app.update(Message::AssignMacroSlot(10, String::new()));
@@ -268,5 +285,10 @@ fn assign_macro_slot_with_invalid_id_does_not_mutate() {
         app.slots().get(10),
         Some(&path),
         "a rejected macro id must not overwrite the existing slot content"
+    );
+    assert_eq!(
+        persist_slots_call_count(),
+        before,
+        "a rejected macro id must not call persist_slots at all"
     );
 }

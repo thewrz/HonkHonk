@@ -12,24 +12,49 @@ use iced::Task;
 use super::{HonkHonk, Message};
 use crate::state::SlotContent;
 
-/// Test-only spy for [`HonkHonk::persist_slots`]: incremented unconditionally,
-/// ahead of the `self.persist` gate, so a test can prove a slot mutation
-/// actually reached the persist call. `HonkHonk::new_for_test()` hardcodes
-/// `persist: false` (see `mod.rs`) so `cargo test` never touches the real
-/// XDG config dir — which also makes the real disk write a guaranteed no-op
-/// and leaves the call itself unobservable without this spy (#169 review).
-/// Compiled only under `cfg(test)`; zero footprint on release builds.
+// Test-only spies for `HonkHonk::persist_slots`: populated unconditionally,
+// ahead of the `self.persist` gate, so a test can prove a slot mutation
+// actually reached the persist call. `HonkHonk::new_for_test()` hardcodes
+// `persist: false` (see `mod.rs`) so `cargo test` never touches the real
+// XDG config dir — which also makes the real disk write a guaranteed no-op
+// and leaves the call itself unobservable without these spies (#169 review).
+//
+// Thread-local, not a process-wide static: `cargo test`'s worker threads run
+// one `#[test]` fn to completion before picking up the next, so within a
+// single test's execution only that test's own code can touch its thread's
+// cell — a call made by an unrelated test running concurrently on another
+// thread can never leak into this test's before/after delta. A process-wide
+// counter could not make that attribution guarantee.
+//
+// Compiled only under `cfg(test)`; zero footprint on release builds.
 #[cfg(test)]
-static PERSIST_SLOTS_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+thread_local! {
+    /// Count of `persist_slots` calls observed on this thread.
+    static PERSIST_SLOTS_CALLS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Clone of `self.slots` taken *inside* `persist_slots`, at the instant
+    /// it runs — lets a test prove ordering (the mutation was already
+    /// applied before persistence ran), not just that persistence ran at
+    /// some point.
+    static PERSIST_SLOTS_SNAPSHOT: std::cell::RefCell<Option<crate::state::SlotMap>> =
+        const { std::cell::RefCell::new(None) };
+}
 
-/// Current value of [`PERSIST_SLOTS_CALLS`]. Assertions must compare a
-/// before/after delta (`after > before`), never an absolute value: the
-/// counter is process-wide and other tests running in parallel also bump it,
-/// but — being monotonic and only ever incremented — can never make a test's
-/// own call disappear from the delta.
+/// Current value of this thread's [`PERSIST_SLOTS_CALLS`] cell. Assertions
+/// must compare a before/after delta (`after > before`), never an absolute
+/// value — see the thread-local's doc comment for why the delta is safe to
+/// trust even under parallel test execution.
 #[cfg(test)]
 pub(crate) fn persist_slots_call_count() -> u32 {
-    PERSIST_SLOTS_CALLS.load(std::sync::atomic::Ordering::SeqCst)
+    PERSIST_SLOTS_CALLS.with(std::cell::Cell::get)
+}
+
+/// The slot map as it looked *inside* the most recent [`HonkHonk::persist_slots`]
+/// call on this thread, or `None` if it has not been called yet this test.
+/// Lets a test assert that a specific mutation was already visible at
+/// persist-time, pinning ordering rather than mere occurrence.
+#[cfg(test)]
+pub(crate) fn persist_slots_last_snapshot() -> Option<crate::state::SlotMap> {
+    PERSIST_SLOTS_SNAPSHOT.with(|snapshot| snapshot.borrow().clone())
 }
 
 impl HonkHonk {
@@ -103,7 +128,11 @@ impl HonkHonk {
     /// `mod.rs`'s `AssignSlot`/`ClearSlot` message arms.
     pub(super) fn persist_slots(&self) {
         #[cfg(test)]
-        PERSIST_SLOTS_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        {
+            PERSIST_SLOTS_CALLS.with(|calls| calls.set(calls.get() + 1));
+            PERSIST_SLOTS_SNAPSHOT
+                .with(|snapshot| *snapshot.borrow_mut() = Some(self.slots.clone()));
+        }
         if self.persist {
             if let Err(e) = self.slots.save() {
                 tracing::warn!(error = %e, "slots save error");
