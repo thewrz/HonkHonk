@@ -68,11 +68,11 @@ impl HonkHonk {
     /// `macro_run_id` so any in-flight `MacroStepDue` / `MacroStepDecoded` for
     /// the old run is ignored on arrival. Idempotent.
     pub(crate) fn cancel_macro(&mut self) {
-        if let Some(playback) = self.macro_playback.take() {
-            if let Some(audio) = &self.audio {
-                for &voice_id in playback.active_voices() {
-                    audio.send(AudioCommand::StopVoice(voice_id));
-                }
+        if let Some(playback) = self.macro_playback.take()
+            && let Some(audio) = &self.audio
+        {
+            for &voice_id in playback.active_voices() {
+                audio.send(AudioCommand::StopVoice(voice_id));
             }
         }
         self.macro_run_id = self.macro_run_id.wrapping_add(1);
@@ -136,10 +136,10 @@ impl HonkHonk {
     /// step has resolved and no voices remain. A voice the run never owned (a
     /// tile press) is ignored. Called for every `PlaybackFinished`.
     pub(crate) fn note_macro_voice_finished(&mut self, voice_id: u64) {
-        if let Some(playback) = &mut self.macro_playback {
-            if playback.on_voice_finished(voice_id) {
-                self.macro_playback = None;
-            }
+        if let Some(playback) = &mut self.macro_playback
+            && playback.on_voice_finished(voice_id)
+        {
+            self.macro_playback = None;
         }
     }
 

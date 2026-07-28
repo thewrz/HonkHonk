@@ -81,13 +81,12 @@ impl NoticeQueue {
             .entries
             .iter()
             .position(|queued| queued.notice == notice)
+            && let Some(mut existing) = self.entries.remove(idx)
         {
-            if let Some(mut existing) = self.entries.remove(idx) {
-                existing.expires_at = notice.expires_at(now);
-                let id = existing.id;
-                self.entries.push_back(existing);
-                return id;
-            }
+            existing.expires_at = notice.expires_at(now);
+            let id = existing.id;
+            self.entries.push_back(existing);
+            return id;
         }
         let id = NoticeId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);

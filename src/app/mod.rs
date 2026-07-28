@@ -1254,19 +1254,19 @@ impl HonkHonk {
     /// Persists the live config unless persistence is disabled (test fixtures
     /// set `persist = false` so `cargo test` never writes the real config file).
     fn persist_config(&self) {
-        if self.persist {
-            if let Err(e) = self.config.save() {
-                tracing::warn!(error = %e, "config save error");
-            }
+        if self.persist
+            && let Err(e) = self.config.save()
+        {
+            tracing::warn!(error = %e, "config save error");
         }
     }
 
     /// Persists the slot map under the same persistence switch as the config.
     fn persist_slots(&self) {
-        if self.persist {
-            if let Err(e) = self.slots.save() {
-                tracing::warn!(error = %e, "slots save error");
-            }
+        if self.persist
+            && let Err(e) = self.slots.save()
+        {
+            tracing::warn!(error = %e, "slots save error");
         }
     }
 
