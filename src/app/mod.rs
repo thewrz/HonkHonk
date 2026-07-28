@@ -35,6 +35,7 @@ mod panels;
 mod playback;
 mod recording;
 mod settings;
+mod slots;
 mod sorting;
 mod sound_metadata;
 
@@ -109,6 +110,8 @@ pub enum Message {
     DurationsLoaded(std::collections::HashMap<String, u64>),
     // Slot assignment
     AssignSlot(u8, std::path::PathBuf),
+    /// Binds a shortcut slot to a macro id instead of a sound (#169).
+    AssignMacroSlot(u8, String),
     ClearSlot(u8),
     // Context menu
     OpenContextMenu(String), // sound_id
@@ -909,23 +912,7 @@ impl HonkHonk {
                 self.shortcuts_warning_dismissed = true;
                 Task::none()
             }
-            Message::ShortcutActivated(idx) => {
-                if let Some(path) = self.slots.get(idx).cloned() {
-                    if let Some(sound) = self.sounds.iter().find(|s| s.path == path).cloned() {
-                        return self.request_play(&sound, true);
-                    } else {
-                        // Path no longer in library (file deleted/moved) — clear stale slot
-                        tracing::warn!(
-                            slot = idx + 1,
-                            ?path,
-                            "slot points to missing file; clearing stale slot"
-                        );
-                        self.slots.clear(idx);
-                        self.persist_slots();
-                    }
-                }
-                Task::none()
-            }
+            Message::ShortcutActivated(idx) => self.activate_slot(idx),
             Message::ShortcutBindingsUpdated(bindings) => {
                 for (idx, trigger) in bindings {
                     if let Some(slot) = self.slot_triggers.get_mut(idx as usize) {
@@ -943,6 +930,7 @@ impl HonkHonk {
                 self.persist_slots();
                 Task::none()
             }
+            Message::AssignMacroSlot(idx, macro_id) => self.assign_macro_slot(idx, macro_id),
             Message::ClearSlot(idx) => {
                 self.slots.clear(idx);
                 self.persist_slots();
