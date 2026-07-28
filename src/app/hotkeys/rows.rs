@@ -149,8 +149,13 @@ pub(super) fn hotkey_haystacks(row: &HotkeyRow) -> [&str; 3] {
 
 impl SortKey<HotkeyRow> for SlotSortKey {
     fn compare(self, left: &HotkeyRow, right: &HotkeyRow) -> Ordering {
-        let primary = match self {
-            Self::SlotNumber => Ordering::Equal,
+        match self {
+            // Slot index *is* the primary key here, so it must fully
+            // reverse under `Direction::Descending` like any other primary
+            // key — it does not go through `tie_break()` (which never
+            // reverses), and it never ties (slot indices are unique), so
+            // `tie_break()` is never reached for this variant anyway.
+            Self::SlotNumber => left.slot_index.cmp(&right.slot_index),
             Self::Name => left
                 .display_name
                 .to_lowercase()
@@ -159,10 +164,16 @@ impl SortKey<HotkeyRow> for SlotSortKey {
             Self::Tag => left.tag.to_lowercase().cmp(&right.tag.to_lowercase()),
             Self::Modified => left.modified_ms.cmp(&right.modified_ms),
             Self::Added => left.added_ms.cmp(&right.added_ms),
-        };
-        // Every row has a unique slot_index, so this tie-break is total: two
-        // distinct rows are never `Ordering::Equal` all the way through.
-        primary.then_with(|| left.slot_index.cmp(&right.slot_index))
+        }
+    }
+
+    /// Every row has a unique slot_index, so this tie-break is total: two
+    /// distinct rows sharing a primary value (e.g. the same `Tag`) are
+    /// never `Ordering::Equal` all the way through. Always ascending,
+    /// regardless of `Direction` — ties must land in the same relative
+    /// order whichever way the primary key is sorted.
+    fn tie_break(self, left: &HotkeyRow, right: &HotkeyRow) -> Ordering {
+        left.slot_index.cmp(&right.slot_index)
     }
 
     fn value_unknown(self, row: &HotkeyRow) -> bool {

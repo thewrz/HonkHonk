@@ -182,8 +182,10 @@ fn sorting_every_key_preserves_the_full_row_set() {
     app.slot_triggers[0] = Some("Meta+1".into());
     app.slots.set(1, PathBuf::from("/b.wav"));
     app.slot_triggers[1] = Some("Meta+2".into());
-    // Slot with unknown values for Length/Modified/Added, to exercise the
-    // unknown-sorts-last path without dropping a row.
+    // Slot with unknown values for Length/Modified/Added — included so this
+    // sweep also proves an unknown-value row is never dropped. Ordering of
+    // unknown values is pinned separately, by
+    // `unknown_values_sort_last_for_length_modified_and_added_regardless_of_direction`.
     app.slot_triggers[2] = Some("Meta+3".into());
 
     for key in SlotSortKey::ALL {
@@ -196,6 +198,79 @@ fn sorting_every_key_preserves_the_full_row_set() {
                 slot_indices,
                 vec![0, 1, 2],
                 "key {key:?} direction {direction:?} dropped or duplicated a row"
+            );
+        }
+    }
+}
+
+/// Regression for a tie-break inversion: `Direction::Descending` must only
+/// reverse the *primary* key, never the slot-index tie-break used when two
+/// rows share a primary value. Two rows tied on `Tag` ("Zoo") at slot indices
+/// 2 and 5, sorted by Tag/Descending, must still break the tie ascending by
+/// slot index — [2, 5], not [5, 2].
+#[test]
+fn descending_sort_breaks_ties_ascending_by_slot_index() {
+    let mut app = HonkHonk::new_for_test();
+    app.sounds = vec![
+        sound("a", "Alpha", "/a.wav", "Zoo"),
+        sound("b", "Bravo", "/b.wav", "Zoo"),
+    ];
+    app.slots.set(2, PathBuf::from("/a.wav"));
+    app.slot_triggers[2] = Some("Meta+1".into());
+    app.slots.set(5, PathBuf::from("/b.wav"));
+    app.slot_triggers[5] = Some("Meta+2".into());
+    app.hotkey_sort = HotkeySortState::new(SlotSortKey::Tag, Direction::Descending);
+
+    let slot_indices: Vec<u8> = app.hotkey_rows().iter().map(|row| row.slot_index).collect();
+
+    assert_eq!(slot_indices, vec![2, 5]);
+}
+
+/// Every non-`SlotNumber` key can produce ties (e.g. two rows sharing a
+/// tag); `SlotNumber` itself can't (slot indices are unique), so its own
+/// primary comparison *is* the tie-break and must still fully reverse under
+/// `Descending`.
+#[test]
+fn slot_number_descending_reverses_slot_order() {
+    let mut app = HonkHonk::new_for_test();
+    app.slot_triggers[1] = Some("Meta+1".into());
+    app.slot_triggers[3] = Some("Meta+2".into());
+    app.slot_triggers[7] = Some("Meta+3".into());
+    app.hotkey_sort = HotkeySortState::new(SlotSortKey::SlotNumber, Direction::Descending);
+
+    let slot_indices: Vec<u8> = app.hotkey_rows().iter().map(|row| row.slot_index).collect();
+
+    assert_eq!(slot_indices, vec![7, 3, 1]);
+}
+
+/// Pins `HotkeyRow`'s own `value_unknown` wiring (duration_ms/modified_ms/
+/// added_ms), not just the generic unknown-sorts-last mechanism already
+/// covered by `ui::list_controls::sort`'s tests: for each of Length/
+/// Modified/Added, a row with no data must sort after a row with data, in
+/// both directions.
+#[test]
+fn unknown_values_sort_last_for_length_modified_and_added_regardless_of_direction() {
+    let mut app = HonkHonk::new_for_test();
+    app.sounds = vec![sound("a", "Alpha", "/a.wav", "Zoo")];
+    app.sound_meta.reconcile_added(["a"], 1_000, false);
+    app.slots.set(0, PathBuf::from("/a.wav"));
+    app.slot_triggers[0] = Some("Meta+1".into());
+    // Slot 1: bound but unassigned -> duration_ms/modified_ms/added_ms all None.
+    app.slot_triggers[1] = Some("Meta+2".into());
+
+    for key in [
+        SlotSortKey::Length,
+        SlotSortKey::Modified,
+        SlotSortKey::Added,
+    ] {
+        for direction in [Direction::Ascending, Direction::Descending] {
+            app.hotkey_sort = HotkeySortState::new(key, direction);
+            let slot_indices: Vec<u8> =
+                app.hotkey_rows().iter().map(|row| row.slot_index).collect();
+            assert_eq!(
+                slot_indices.last().copied(),
+                Some(1),
+                "key {key:?} direction {direction:?} did not place the unknown-value row last"
             );
         }
     }

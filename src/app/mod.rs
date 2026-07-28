@@ -6,20 +6,23 @@ use std::time::{Duration, Instant};
 use iced::widget::{button, container, row, scrollable, space, text};
 use iced::{Element, Length, Point, Subscription, Task, Theme};
 
+#[cfg(test)]
 use crate::audio::effects::EffectSlot;
 use crate::audio::{AudioCommand, AudioEvent, AudioHandle, PlayMode};
 use crate::shortcuts::ShortcutsStatus;
-use crate::state::config::{Density, OverlapMode};
+use crate::state::config::OverlapMode;
 use crate::state::{AppConfig, LibraryScan, SlotMap, SoundEntry, SoundMetaStore};
 use crate::tray::{TrayEvent, TrayHandle};
-use crate::ui::effects_panel::{self, EffectsUiState, PresetId};
+#[cfg(test)]
+use crate::ui::effects_panel::PresetId;
+use crate::ui::effects_panel::{self, EffectsUiState};
 use crate::ui::effects_panel_view;
 use crate::ui::list_controls::filter::FilterState;
 use crate::ui::side_panel::{PanelAnim, PanelFlourish};
 use crate::ui::sound_grid;
 use crate::ui::theme::{self, Hh};
 use crate::ui::{now_playing, slot_manager};
-use notices::{Notice, NoticeId, NoticeQueue};
+use notices::{Notice, NoticeQueue};
 
 /// Play-dispatch coordination (`request_play` / `handle_decoded` /
 /// `start_playback`), extracted to keep this file from growing (#151).
@@ -29,6 +32,9 @@ mod header;
 mod hotkeys;
 mod library_scan;
 mod macros;
+/// The `Message` enum, extracted out of `mod.rs` per CLAUDE.md's file-size
+/// override — see the module doc for why (#199).
+mod message;
 #[cfg(test)]
 mod notice_tests;
 pub(crate) mod notices;
@@ -46,6 +52,7 @@ mod sound_metadata;
 /// (which owns the state it's built from) and `crate::ui::settings::hotkeys`
 /// (a sibling tree that renders it) — see `hotkeys.rs`'s module doc.
 pub(crate) use hotkeys::HotkeyRow;
+pub use message::Message;
 pub use settings::SettingsMessage;
 
 /// Virtual category name used for the Favorites filtered tab.
@@ -60,149 +67,6 @@ pub enum ViewMode {
 }
 
 pub use crate::settings::SettingCategory as SettingsSection;
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Message {
-    NoOp,
-    ToggleVisibility,
-    Quit,
-    TrayEvent(TrayEvent),
-    TrayPoll,
-    AudioEvent(AudioEvent),
-    RaiseNotice(Notice),
-    DismissNotice(NoticeId),
-    NoticeTick(Instant),
-    PlaySound(String),
-    StopAll,
-    StartRecording,
-    StopRecording,
-    /// Fire macro by id (slots call this in #169).
-    PlayMacro(String),
-    /// A scheduled macro step's timer elapsed; dispatch it if its run is current.
-    MacroStepDue {
-        run_id: u64,
-        step: usize,
-    },
-    /// A cold macro step's off-thread decode finished.
-    MacroStepDecoded {
-        run_id: u64,
-        voice_id: u64,
-        sound_id: String,
-        gain: f32,
-        effects: crate::audio::effects::EffectSettings,
-        result: Result<crate::audio::CachedPcm, String>,
-    },
-    SelectCategory(Option<String>),
-    SearchChanged(String),
-    ToggleSoundSortMenu,
-    ToggleSoundSortDirection,
-    SelectSoundSort(&'static str),
-    DismissSoundSortMenu,
-    // Settings → Shortcuts list controls (#199): filter query and sort chip,
-    // independent of the tiles view's messages above.
-    HotkeySearchChanged(String),
-    ToggleHotkeySortMenu,
-    ToggleHotkeySortDirection,
-    SelectHotkeySort(&'static str),
-    DismissHotkeySortMenu,
-    /// Seeds the active filter from an otherwise-unhandled printable keypress.
-    TypeToFilter(String),
-    /// Routes an uncaptured Escape through overlay and filter staging.
-    EscapePressed,
-    /// Routes a widget-captured Escape without clearing the filter query.
-    CapturedEscapePressed,
-    VolumeChanged(f32),
-    VolumeSaveRequested,
-    // Shortcut lifecycle
-    ShortcutsReady,
-    ShortcutsUnavailable(String),
-    DismissShortcutsWarning,
-    // Shortcut activation
-    ShortcutActivated(u8),
-    ShortcutBindingsUpdated(Vec<(u8, String)>),
-    // Duration scanning
-    DurationsLoaded(std::collections::HashMap<String, u64>),
-    // Slot assignment
-    AssignSlot(u8, std::path::PathBuf),
-    ClearSlot(u8),
-    // Context menu
-    OpenContextMenu(String), // sound_id
-    CloseContextMenu,
-    // Window / cursor
-    CursorMoved(Point),
-    WindowResized(f32, f32),
-    /// Per-frame redraw tick (vsync-paced via `window::frames()`), carrying the
-    /// frame time. Only subscribed while a sound plays. Drives playhead interpolation.
-    Frame(Instant),
-    // Navigation
-    ShowSlots,
-    ShowMain,
-    SelectSlot(u8),
-    Settings(SettingsMessage),
-    // Library management
-    RescanLibrary,
-    AddSoundDirectory,
-    SoundDirectoryPickResult(Option<std::path::PathBuf>),
-    RemoveSoundDirectory(std::path::PathBuf),
-    // Appearance
-    ThemeChanged(theme::Theme),
-    DensityChanged(Density),
-    PanelAnimationsChanged(bool),
-    RendererChanged(crate::state::Renderer),
-    // Audio
-    MicPassthroughChanged(bool),
-    MicPassthroughLevelChanged(f32),
-    OverlapModeChanged(OverlapMode),
-    MonitorDeviceChanged(Option<String>),
-    InputDeviceChanged(Option<String>),
-    // Voice effects
-    SelectEffectPreset(PresetId),
-    SetEffectBypassUi(bool),
-    SetWetDryMix(f32),
-    SetEffectParamUi {
-        slot: EffectSlot,
-        param: &'static str,
-        value: f32,
-    },
-    /// Toggle the effects side panel open/closed (pull tab).
-    ToggleEffectsPanel,
-    /// Close the effects side panel (scrim / ✕ / Escape).
-    CloseEffectsPanel,
-    /// Carries the command sender from the portal stream.
-    /// Two `ShortcutHandle` messages are never meaningfully equal — treated as always-unequal.
-    ShortcutHandle(crate::shortcuts::PortalCmdSender),
-    /// Opens the DE's native shortcut configuration dialog for this session.
-    OpenShortcutConfig,
-    /// Whether `configure_shortcuts()` (portal v2) is available on this DE/backend.
-    ShortcutsConfigureAvailable(bool),
-    // Per-sound metadata
-    ToggleFavorite(String),
-    OpenSoundEditor(String),
-    CloseSoundEditor,
-    SoundEditorNameChanged(String),
-    SoundEditorVolumeChanged(String, f32),
-    SaveSoundMeta(String),
-    /// A background decode completed for play generation `generation`. Applied
-    /// only if still the current generation (#149/#151).
-    Decoded {
-        generation: u64,
-        voice_id: u64,
-        id: String,
-        result: Result<crate::audio::CachedPcm, String>,
-        gain: f32,
-        effects: crate::audio::effects::EffectSettings,
-        mode: PlayMode,
-    },
-}
-
-impl Message {
-    pub fn from_tray_event(event: TrayEvent) -> Self {
-        match event {
-            TrayEvent::ToggleVisibility => Message::ToggleVisibility,
-            TrayEvent::Quit => Message::Quit,
-        }
-    }
-}
 
 /// Smallest window dimension treated as a real, usable size. Resize events
 /// below it (some compositors emit 0-size on minimize) are not recorded, and
