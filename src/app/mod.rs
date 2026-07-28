@@ -25,6 +25,8 @@ use notices::{Notice, NoticeId, NoticeQueue};
 /// `start_playback`), extracted to keep this file from growing (#151).
 mod filtering;
 mod header;
+/// Settings → Shortcuts bindings list sort state (#199).
+mod hotkeys;
 mod library_scan;
 mod macros;
 #[cfg(test)]
@@ -35,6 +37,8 @@ mod panels;
 mod playback;
 mod recording;
 mod settings;
+/// Sort key shared by the hotkeys list (#199) and, later, the slot manager (#198).
+mod slot_sort;
 mod sorting;
 mod sound_metadata;
 
