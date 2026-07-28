@@ -28,9 +28,10 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   # Sound library: read-only access to user's music folder
   - --filesystem=xdg-music:ro
-  # User config and data dirs (XDG paths used by honkhonk)
-  - --filesystem=xdg-config/honkhonk:create
-  - --filesystem=xdg-data/honkhonk:create
+  # NOTE: no xdg-config/xdg-data grants. Flatpak redirects the XDG base dirs to
+  # ~/.var/app/<app-id>/, which is what `directories::ProjectDirs` resolves to
+  # inside the sandbox — the app never reads the host ~/.config/honkhonk, so
+  # granting it would widen the sandbox without changing behavior.
 
 modules:
   - name: honkhonk
@@ -48,8 +49,13 @@ modules:
           assets/honkhonk.desktop > /tmp/io.github.wrzonance.HonkHonk.desktop
       - install -Dm644 /tmp/io.github.wrzonance.HonkHonk.desktop
           /app/share/applications/io.github.wrzonance.HonkHonk.desktop
-      # Install the full app-id-named icon set (all sizes + scalable + symbolic)
-      - cp -r assets/icons/generated/hicolor /app/share/icons/
+      # Install the full app-id-named icon set (all sizes + scalable + symbolic).
+      # Create the theme dir first and copy the CONTENTS into it: a bare
+      # `cp -r hicolor /app/share/icons/` collapses the theme level to
+      # /app/share/icons/64x64/... when /app/share/icons does not yet exist,
+      # and the icons are then never found.
+      - install -d /app/share/icons/hicolor
+      - cp -r assets/icons/generated/hicolor/. /app/share/icons/hicolor/
       # Install AppStream metainfo
       - install -Dm644 packaging/flatpak/io.github.wrzonance.HonkHonk.metainfo.xml
           /app/share/metainfo/io.github.wrzonance.HonkHonk.metainfo.xml
