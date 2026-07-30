@@ -133,10 +133,10 @@ impl HonkHonk {
             PERSIST_SLOTS_SNAPSHOT
                 .with(|snapshot| *snapshot.borrow_mut() = Some(self.slots.clone()));
         }
-        if self.persist {
-            if let Err(e) = self.slots.save() {
-                tracing::warn!(error = %e, "slots save error");
-            }
+        if self.persist
+            && let Err(e) = self.slots.save()
+        {
+            tracing::warn!(error = %e, "slots save error");
         }
     }
 }

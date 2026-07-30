@@ -1242,10 +1242,10 @@ impl HonkHonk {
     /// Persists the live config unless persistence is disabled (test fixtures
     /// set `persist = false` so `cargo test` never writes the real config file).
     fn persist_config(&self) {
-        if self.persist {
-            if let Err(e) = self.config.save() {
-                tracing::warn!(error = %e, "config save error");
-            }
+        if self.persist
+            && let Err(e) = self.config.save()
+        {
+            tracing::warn!(error = %e, "config save error");
         }
     }
 

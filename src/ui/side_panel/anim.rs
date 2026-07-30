@@ -40,10 +40,10 @@ impl PanelAnim {
     /// Settles the leg once it has fully elapsed, then returns progress at `now`.
     /// Call once per frame.
     pub fn tick(&mut self, now: Instant) -> f32 {
-        if let PanelAnim::Animating { to, start, .. } = *self {
-            if now.saturating_duration_since(start) >= SLIDE_DURATION {
-                *self = PanelAnim::Settled(to);
-            }
+        if let PanelAnim::Animating { to, start, .. } = *self
+            && now.saturating_duration_since(start) >= SLIDE_DURATION
+        {
+            *self = PanelAnim::Settled(to);
         }
         self.progress(now)
     }
