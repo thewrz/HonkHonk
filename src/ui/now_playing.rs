@@ -114,10 +114,10 @@ impl NowPlaying {
     pub fn sync(&mut self, playing: Option<&str>, progress: f32) -> bool {
         // Hot path: compare without allocating an owned id. Only build the
         // owned `RenderKey` when the key actually changes (i.e. on a clear).
-        if let Some(key) = &self.key {
-            if key.matches(playing, progress) {
-                return false;
-            }
+        if let Some(key) = &self.key
+            && key.matches(playing, progress)
+        {
+            return false;
         }
         self.cache.clear();
         self.key = Some(render_key(playing, progress));
@@ -126,10 +126,10 @@ impl NowPlaying {
 
     fn sync_active(&mut self) -> bool {
         let playing = self.active_id.as_deref();
-        if let Some(key) = &self.key {
-            if key.matches(playing, self.display_progress) {
-                return false;
-            }
+        if let Some(key) = &self.key
+            && key.matches(playing, self.display_progress)
+        {
+            return false;
         }
         self.cache.clear();
         self.key = Some(render_key(playing, self.display_progress));
