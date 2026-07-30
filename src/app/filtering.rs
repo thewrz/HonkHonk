@@ -36,6 +36,19 @@ pub(super) fn type_to_filter_text(event: &iced::Event, status: Status) -> Option
         .then(|| text.to_string())
 }
 
+/// The search input that type-to-filter focuses when it seeds `target`.
+///
+/// A named seam rather than two inline `focus(..)` literals: Iced's `Task` is
+/// opaque, so a test can only observe *that* an operation was scheduled, never
+/// which widget it targets. Routing both branches through here makes the
+/// id-per-target mapping directly assertable.
+fn filter_input_id(target: FilterTarget) -> iced::widget::Id {
+    match target {
+        FilterTarget::Tiles => search_bar::input_id(),
+        FilterTarget::Hotkeys => search_bar::hotkeys_input_id(),
+    }
+}
+
 impl HonkHonk {
     pub(super) fn select_sound_category(&mut self, category: Option<String>) {
         if self.active_category == category {
@@ -89,7 +102,7 @@ impl HonkHonk {
             Some(FilterTarget::Tiles) => self.insert_tiles_filter_text(text),
             Some(FilterTarget::Hotkeys) => {
                 self.hotkey_filter.insert(text);
-                iced::widget::operation::focus(search_bar::hotkeys_input_id())
+                iced::widget::operation::focus(filter_input_id(FilterTarget::Hotkeys))
             }
             None => iced::Task::none(),
         }
@@ -104,7 +117,7 @@ impl HonkHonk {
         if !text.is_empty() {
             self.refresh_filtered_sounds();
         }
-        iced::widget::operation::focus(search_bar::input_id())
+        iced::widget::operation::focus(filter_input_id(FilterTarget::Tiles))
     }
 
     pub(super) fn handle_escape(&mut self, event_was_captured: bool) -> iced::Task<Message> {

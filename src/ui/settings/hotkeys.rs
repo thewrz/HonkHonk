@@ -179,23 +179,3 @@ fn row_tag(tag: &str, t: Theme) -> Element<'static, Message> {
         .color(t.ink_faint())
         .into()
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::app::HonkHonk;
-    use crate::ui::theme::Theme;
-
-    use super::view_hotkeys_section;
-
-    /// Smoke coverage only (per `CLAUDE.md`, Iced view rendering itself is
-    /// not tested here): the section must build without panicking for the
-    /// unfiltered-empty state (no hotkeys assigned yet), matching the sibling
-    /// `library`/`audio` section views' convention of leaving pixel-level
-    /// assertions to the invariant tests at `hotkey_rows()`'s boundary.
-    #[test]
-    fn view_hotkeys_section_builds_for_the_default_state() {
-        let state = HonkHonk::new_for_test();
-
-        let _element = view_hotkeys_section(&state, Theme::Light);
-    }
-}

@@ -47,6 +47,9 @@ fn hotkey_sort_menu_overlay_renders_over_the_settings_view() {
     harness.click("Settings");
     harness.click("Hotkeys");
 
+    // Sort-menu rows are labelled "✓ <key>" when selected and "  <key>" (two
+    // leading spaces) otherwise, so the two-space prefix is what distinguishes
+    // a menu row from the same key name appearing elsewhere in the view.
     assert!(
         !harness.find("  Name"),
         "sort menu should be closed until the sort chip is clicked"
@@ -59,7 +62,10 @@ fn hotkey_sort_menu_overlay_renders_over_the_settings_view() {
         "opening the Shortcuts sort chip should stack the sort-menu overlay \
          over the settings view (#199 task 8)"
     );
-    assert!(harness.find("  Name"));
+    assert!(
+        harness.find("  Name"),
+        "the open sort menu should list unselected keys such as Name"
+    );
 }
 
 #[test]

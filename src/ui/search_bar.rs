@@ -75,7 +75,8 @@ where
     )
 }
 
-/// Builds the click-only hotkeys-section search using the same stable input stack.
+/// Builds the hotkeys-section search (type-to-filter activated) using the same
+/// stable input stack.
 pub fn view_hotkeys_search_bar<'a, Message>(
     query: &'a str,
     t: Theme,

@@ -166,6 +166,26 @@ fn typed_filter_text_focuses_the_targeted_search_input() {
     );
 }
 
+/// `units() > 0` above proves a focus task is scheduled but not *where* it
+/// points — Iced's `Task` cannot be inspected. `filter_input_id` is the seam
+/// both branches focus through, so pinning it here covers the other half:
+/// the two targets must never focus each other's input.
+#[test]
+fn each_filter_target_focuses_its_own_search_input() {
+    assert_eq!(
+        super::filter_input_id(FilterTarget::Tiles),
+        search_bar::input_id()
+    );
+    assert_eq!(
+        super::filter_input_id(FilterTarget::Hotkeys),
+        search_bar::hotkeys_input_id()
+    );
+    assert_ne!(
+        super::filter_input_id(FilterTarget::Tiles),
+        super::filter_input_id(FilterTarget::Hotkeys)
+    );
+}
+
 #[test]
 fn staged_settings_search_blocks_hotkeys_type_to_filter() {
     let mut app = HonkHonk::new_for_test();
