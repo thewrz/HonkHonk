@@ -271,10 +271,10 @@ pub fn shortcut_stream(_window_id: Option<WindowIdentifier>) -> impl Stream<Item
         loop {
             tokio::select! {
                 Some(event) = activated.next() => {
-                    if let Some(idx) = parse_slot_index(event.shortcut_id()) {
-                        if tx.send(ShortcutEvent::Activated(idx)).await.is_err() {
-                            break;
-                        }
+                    if let Some(idx) = parse_slot_index(event.shortcut_id())
+                        && tx.send(ShortcutEvent::Activated(idx)).await.is_err()
+                    {
+                        break;
                     }
                 }
                 Some(changed_event) = changed.next() => {
@@ -290,10 +290,10 @@ pub fn shortcut_stream(_window_id: Option<WindowIdentifier>) -> impl Stream<Item
                 Some(cmd) = cmd_rx.recv() => {
                     match cmd {
                         PortalCommand::ConfigureShortcuts => {
-                            if configure_available {
-                                if let Err(e) = configure_shortcuts_raw(&conn, &session_path).await {
-                                    tracing::warn!(error = %e, "configure_shortcuts failed");
-                                }
+                            if configure_available
+                                && let Err(e) = configure_shortcuts_raw(&conn, &session_path).await
+                            {
+                                tracing::warn!(error = %e, "configure_shortcuts failed");
                             }
                         }
                     }
