@@ -45,6 +45,7 @@ mod recording;
 mod settings;
 /// Sort key shared by the hotkeys list (#199) and, later, the slot manager (#198).
 mod slot_sort;
+mod slots;
 mod sorting;
 mod sound_metadata;
 
@@ -827,23 +828,7 @@ impl HonkHonk {
                 self.shortcuts_warning_dismissed = true;
                 Task::none()
             }
-            Message::ShortcutActivated(idx) => {
-                if let Some(path) = self.slots.get(idx).cloned() {
-                    if let Some(sound) = self.sounds.iter().find(|s| s.path == path).cloned() {
-                        return self.request_play(&sound, true);
-                    } else {
-                        // Path no longer in library (file deleted/moved) — clear stale slot
-                        tracing::warn!(
-                            slot = idx + 1,
-                            ?path,
-                            "slot points to missing file; clearing stale slot"
-                        );
-                        self.slots.clear(idx);
-                        self.persist_slots();
-                    }
-                }
-                Task::none()
-            }
+            Message::ShortcutActivated(idx) => self.activate_slot(idx),
             Message::ShortcutBindingsUpdated(bindings) => {
                 for (idx, trigger) in bindings {
                     if let Some(slot) = self.slot_triggers.get_mut(idx as usize) {
@@ -861,6 +846,7 @@ impl HonkHonk {
                 self.persist_slots();
                 Task::none()
             }
+            Message::AssignMacroSlot(idx, macro_id) => self.assign_macro_slot(idx, macro_id),
             Message::ClearSlot(idx) => {
                 self.slots.clear(idx);
                 self.persist_slots();
@@ -1172,19 +1158,10 @@ impl HonkHonk {
     /// Persists the live config unless persistence is disabled (test fixtures
     /// set `persist = false` so `cargo test` never writes the real config file).
     fn persist_config(&self) {
-        if self.persist {
-            if let Err(e) = self.config.save() {
-                tracing::warn!(error = %e, "config save error");
-            }
-        }
-    }
-
-    /// Persists the slot map under the same persistence switch as the config.
-    fn persist_slots(&self) {
-        if self.persist {
-            if let Err(e) = self.slots.save() {
-                tracing::warn!(error = %e, "slots save error");
-            }
+        if self.persist
+            && let Err(e) = self.config.save()
+        {
+            tracing::warn!(error = %e, "config save error");
         }
     }
 
@@ -1504,6 +1481,7 @@ impl HonkHonk {
                         slots: &self.slots,
                         slot_triggers: &self.slot_triggers,
                         sounds: &self.sounds,
+                        macros: &self.macros,
                         selected_slot: self.selected_slot,
                         configure_available: self.shortcut_config.can_open(),
                     },
@@ -2247,6 +2225,19 @@ mod tests {
         let _ = app.update(Message::AssignSlot(3, path.clone()));
         let _ = app.update(Message::ClearSlot(3));
         assert!(app.slots().get(3).is_none());
+    }
+
+    /// `Message::ClearSlot` must behave identically regardless of which
+    /// `SlotContent` variant it clears — pinned as a macro-slot counterpart
+    /// to `clear_slot_removes_assignment` above (#169).
+    #[test]
+    fn clear_slot_removes_macro_assignment() {
+        let mut app = HonkHonk::new_for_test();
+        let id = app.macros.add("Honk combo").id.clone();
+        let _ = app.update(Message::AssignMacroSlot(3, id));
+        assert!(app.slots().content(3).is_some());
+        let _ = app.update(Message::ClearSlot(3));
+        assert!(app.slots().content(3).is_none());
     }
 
     #[test]

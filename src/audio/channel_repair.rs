@@ -36,7 +36,7 @@ fn is_valid_stereo(samples: &[f32], sample_rate: u32, channels: u16) -> bool {
     channels == 2
         && sample_rate > 0
         && !samples.is_empty()
-        && samples.len() % 2 == 0
+        && samples.len().is_multiple_of(2)
         && samples.iter().all(|sample| sample.is_finite())
 }
 
@@ -87,7 +87,7 @@ fn advance_window_energy(
     energy: f64,
 ) -> f64 {
     let rebase_interval = window_frames * ENERGY_REBASE_WINDOWS;
-    if window_start % rebase_interval == 0 {
+    if window_start.is_multiple_of(rebase_interval) {
         return window_energy(samples, lane, window_start, window_frames);
     }
 

@@ -84,6 +84,8 @@ pub enum Message {
     DurationsLoaded(std::collections::HashMap<String, u64>),
     // Slot assignment
     AssignSlot(u8, std::path::PathBuf),
+    /// Binds a shortcut slot to a macro id instead of a sound (#169).
+    AssignMacroSlot(u8, String),
     ClearSlot(u8),
     // Context menu
     OpenContextMenu(String), // sound_id
