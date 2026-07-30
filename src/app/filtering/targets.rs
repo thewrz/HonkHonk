@@ -53,6 +53,49 @@ mod tests {
 
     const VIEW_MODES: [ViewMode; 3] = [ViewMode::Main, ViewMode::SlotManager, ViewMode::Settings];
 
+    /// Compile-time tripwire for the two hand-maintained arrays above.
+    ///
+    /// Neither enum exposes an authoritative all-variants list, so a runtime
+    /// test iterating `SECTIONS`/`VIEW_MODES` cannot notice a variant missing
+    /// from them. These exhaustive matches can: adding a `ViewMode` or
+    /// `SettingsSection` stops this module compiling, which lands the author
+    /// directly on the arrays and `EXPECTED_ROUTING` that must grow with it.
+    /// The index each arm yields is what the assertion below pins.
+    const fn section_index(section: SettingsSection) -> usize {
+        match section {
+            SettingsSection::Audio => 0,
+            SettingsSection::Library => 1,
+            SettingsSection::Hotkeys => 2,
+            SettingsSection::Appearance => 3,
+            SettingsSection::About => 4,
+        }
+    }
+
+    const fn view_mode_index(view_mode: ViewMode) -> usize {
+        match view_mode {
+            ViewMode::Main => 0,
+            ViewMode::SlotManager => 1,
+            ViewMode::Settings => 2,
+        }
+    }
+
+    /// Ties the arrays to the matches above — each must list every variant
+    /// once, in index order — and the table to the arrays, so a state added
+    /// to one but not the others fails the build rather than a later assert.
+    const _: () = {
+        let mut i = 0;
+        while i < SECTIONS.len() {
+            assert!(section_index(SECTIONS[i]) == i);
+            i += 1;
+        }
+        let mut i = 0;
+        while i < VIEW_MODES.len() {
+            assert!(view_mode_index(VIEW_MODES[i]) == i);
+            i += 1;
+        }
+        assert!(EXPECTED_ROUTING.len() == VIEW_MODES.len() * SECTIONS.len() * 2);
+    };
+
     /// Every `(view_mode, section, staged-search)` state with its intended
     /// target written out literally, rather than re-deriving it from
     /// [`active_filter_target`]'s own match — a mirrored oracle can only fail
@@ -95,9 +138,13 @@ mod tests {
         (ViewMode::Settings, SettingsSection::About,      true,  None),
     ];
 
-    /// The table above is only a totality proof if it actually enumerates
-    /// every state — a new `ViewMode` or `SettingsSection` must fail here
-    /// rather than silently go unrouted.
+    /// The table is only a totality proof if it enumerates every state, so
+    /// this pins that it covers the full `VIEW_MODES × SECTIONS × searching`
+    /// product exactly once — no gaps, no contradicting duplicate rows.
+    ///
+    /// Keeping those arrays complete is the compile-time guard's job, not
+    /// this test's: both are hand-maintained, so a variant missing from an
+    /// array would be missing from this loop too.
     #[test]
     fn expectation_table_covers_every_state_exactly_once() {
         for view_mode in VIEW_MODES {
