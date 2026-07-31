@@ -134,6 +134,19 @@ jobs:
             exit 1
           fi
 
+  # ─── Packaging identity ─────────────────────────────────────────────
+  # Runs on every PR, unfiltered by path: the drift this guards against (the
+  # old Flatpak app-id reappearing) can land in any file, so a paths: filter
+  # would defeat it. Needs no toolchain — bash, git and grep only.
+  identity-sweep:
+    name: Flatpak identity sweep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Sweep for stale Flatpak identity
+        run: bash tests/packaging/flatpak_identity_sweep.sh
+
   # ─── LOC Check ──────────────────────────────────────────────────────
   # Only runs on pull requests — measures LOC delta vs base branch.
   loc-check:
