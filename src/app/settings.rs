@@ -56,11 +56,21 @@ impl HonkHonk {
     }
 
     pub(super) fn show_settings_section(&mut self, section: SettingsSection) -> Task<Message> {
+        // Any sort menu open on the previous section (tiles' or Hotkeys')
+        // must not survive a section switch: the anchor is a shared field,
+        // so leaving it set would let a menu opened on one section keep
+        // rendering (or silently reopen) on another.
+        self.sort_menu_anchor = None;
         self.settings_ui.select_section(section);
         Task::none()
     }
 
     pub(super) fn change_settings_search(&mut self, query: String) -> Task<Message> {
+        // The staged settings search swaps the section body for `search_results`
+        // while leaving `settings_ui.section()` untouched, so a Shortcuts sort
+        // menu left open would keep stacking its overlay on top of the results.
+        // Same shared-anchor reasoning as `show_settings_section` above.
+        self.sort_menu_anchor = None;
         match self.settings_ui.replace_query(query) {
             Some(RestoreTarget::Setting(request)) => {
                 crate::ui::settings::locate_setting_row(request)
@@ -132,6 +142,45 @@ mod tests {
         let _ = app.show_settings();
 
         assert!(app.sort_menu_anchor.is_none());
+    }
+
+    #[test]
+    fn switching_section_dismisses_an_open_sort_menu() {
+        let mut app = HonkHonk::new_for_test();
+        app.settings_ui.select_section(SettingCategory::Hotkeys);
+        app.toggle_hotkey_sort_menu();
+        assert!(
+            app.sort_menu_anchor.is_some(),
+            "setup: sort menu did not open"
+        );
+
+        let _ = app.show_settings_section(SettingCategory::Appearance);
+
+        assert!(app.sort_menu_anchor.is_none());
+    }
+
+    /// A staged settings search keeps `section()` on Hotkeys while replacing
+    /// the body with search results, so an open sort menu would otherwise
+    /// stay stacked over them — `view_hotkey_sort_overlay`'s section guard
+    /// cannot catch this on its own.
+    #[test]
+    fn starting_a_settings_search_dismisses_an_open_sort_menu() {
+        let mut app = HonkHonk::new_for_test();
+        app.settings_ui.select_section(SettingCategory::Hotkeys);
+        app.toggle_hotkey_sort_menu();
+        assert!(
+            app.sort_menu_anchor.is_some(),
+            "setup: sort menu did not open"
+        );
+
+        let _ = app.change_settings_search("theme".to_owned());
+
+        assert!(app.sort_menu_anchor.is_none());
+        assert!(
+            app.view_hotkey_sort_overlay(crate::ui::theme::Theme::Light)
+                .is_none(),
+            "no sort overlay may render over the search results"
+        );
     }
 
     #[test]
