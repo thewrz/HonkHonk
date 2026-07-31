@@ -68,6 +68,16 @@ pub trait SortKey<T>: SortLabel + Sized {
     fn value_unknown(self, _item: &T) -> bool {
         false
     }
+
+    /// Breaks a tie left by `compare()` (i.e. `compare()` returned
+    /// `Ordering::Equal`). Unlike `compare()`, this is **never** reversed by
+    /// `Direction` — `sorted()` applies it after direction has already been
+    /// applied to the primary comparison, so a tie-break stays in the same
+    /// order regardless of ascending/descending. Defaults to `Equal` (no
+    /// tie-break) for keys where `compare()` is already total.
+    fn tie_break(self, _left: &T, _right: &T) -> Ordering {
+        Ordering::Equal
+    }
 }
 
 impl<K: Copy> SortState<K> {
@@ -88,7 +98,10 @@ impl<K: Copy> SortState<K> {
             match (self.key.value_unknown(left), self.key.value_unknown(right)) {
                 (false, true) => Ordering::Less,
                 (true, false) => Ordering::Greater,
-                _ => self.direction.apply(self.key.compare(left, right)),
+                _ => self
+                    .direction
+                    .apply(self.key.compare(left, right))
+                    .then_with(|| self.key.tie_break(left, right)),
             }
         });
         sorted
