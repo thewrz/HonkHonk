@@ -12,6 +12,10 @@ use iced::Task;
 use super::{HonkHonk, Message};
 use crate::state::SlotContent;
 
+mod rows;
+#[cfg(test)]
+mod sort_tests;
+
 // Test-only spies for `HonkHonk::persist_slots`: populated unconditionally,
 // ahead of the `self.persist` gate, so a test can prove a slot mutation
 // actually reached the persist call. `HonkHonk::new_for_test()` hardcodes
