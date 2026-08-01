@@ -102,6 +102,31 @@ fn filter_matches_display_name_filename_and_tag_case_insensitively() {
     );
 }
 
+/// `MacroStore` accepts a blank or whitespace-only macro name, which every
+/// rendering surface shows as "Untitled macro" (`slot_manager::display_name`).
+/// The row must carry that same label, or the grid would be searchable and
+/// sortable by a value the user cannot see: querying the visible label would
+/// match nothing, and a whitespace-only name would sort ahead of every real
+/// one instead of being treated as unnamed.
+#[test]
+fn unnamed_macro_slots_filter_and_sort_by_their_visible_label() {
+    for raw_name in ["", "   \t "] {
+        let mut app = HonkHonk::new_for_test();
+        let id = app.macros.add(raw_name).id.clone();
+        app.slots.set_macro(4, &id).expect("valid macro id");
+
+        app.slot_filter.replace("untitled".into());
+        let rows = app.slot_rows();
+        assert_eq!(
+            rows.len(),
+            1,
+            "macro named {raw_name:?} renders as \"Untitled macro\" and must be findable by it"
+        );
+        assert_eq!(rows[0].slot_index, 4);
+        assert_eq!(rows[0].display_name, "Untitled macro");
+    }
+}
+
 /// An empty query matches every slot — all 20 rows, not just the populated
 /// ones (`build_slot_rows` is total).
 #[test]

@@ -83,13 +83,20 @@ fn sound_slot_row(state: &HonkHonk, idx: u8, path: &Path) -> SlotRow {
 /// A slot bound to a macro id. A deleted macro is a dangling row too — it
 /// collapses to the fully blank `empty_slot_row` shape, same as a dangling
 /// sound reference.
+///
+/// The name comes from `slot_manager::display_name`, the same helper the tile
+/// and sidebar render — `MacroStore` accepts a blank or whitespace-only name,
+/// which those surfaces show as "Untitled macro". Deriving the row's name any
+/// other way would make the grid searchable and sortable by a value the user
+/// cannot see: querying the visible label would match nothing, and a
+/// whitespace-only name would sort ahead of every real one.
 fn macro_slot_row(state: &HonkHonk, idx: u8, id: &str) -> SlotRow {
     let Some(entry) = state.macros.get(id) else {
         return empty_slot_row(idx);
     };
     SlotRow {
         slot_index: idx,
-        display_name: resolved_display_name(Some(entry.name.as_str()), ""),
+        display_name: crate::ui::slot_manager::display_name(entry).to_owned(),
         ..empty_slot_row(idx)
     }
 }

@@ -17,6 +17,7 @@ use iced_test::simulator;
 
 use super::*;
 use crate::state::{AudioFormat, SlotMap};
+use crate::test_lock::gui_lock;
 use std::path::PathBuf;
 
 fn sound(id: &str, name: &str, path: &str) -> SoundEntry {
@@ -65,6 +66,7 @@ fn two_bound_slots() -> (SlotMap, Vec<SoundEntry>) {
 
 #[test]
 fn grid_renders_only_the_slots_present_in_render_order() {
+    let _gui = gui_lock();
     let (slots, sounds) = two_bound_slots();
     let macros = MacroStore::default();
     let triggers = empty_triggers();
@@ -89,6 +91,7 @@ fn grid_renders_only_the_slots_present_in_render_order() {
 /// reflects the tile's real `slot_index`, never its position in the grid.
 #[test]
 fn grid_reorders_tiles_without_remapping_their_slot_number_label() {
+    let _gui = gui_lock();
     let (slots, sounds) = two_bound_slots();
     let macros = MacroStore::default();
     let triggers = empty_triggers();
@@ -114,6 +117,7 @@ fn grid_reorders_tiles_without_remapping_their_slot_number_label() {
 /// element must remain usable after `render_order` itself has been dropped.
 #[test]
 fn grid_element_outlives_the_render_order_slice_it_was_built_from() {
+    let _gui = gui_lock();
     let (slots, sounds) = two_bound_slots();
     let macros = MacroStore::default();
     let triggers = empty_triggers();
@@ -129,10 +133,26 @@ fn grid_element_outlives_the_render_order_slice_it_was_built_from() {
     assert!(ui.find("Beta").is_ok());
 }
 
+/// A filtered grid can end on a partial row. Tiles are `Length::Fill`, so a
+/// short row without fillers would stretch its survivors across the whole
+/// grid — one match would render as a single full-width card. Iced view
+/// rendering is intentionally not unit-tested here; this pins the pure
+/// filler-slot contract the grid rows are built from, as
+/// `sound_grid::incomplete_rows_reserve_all_missing_tile_slots` does.
+#[test]
+fn incomplete_rows_reserve_all_missing_tile_slots() {
+    assert_eq!(missing_tile_slots(0), 5);
+    assert_eq!(missing_tile_slots(1), 4);
+    assert_eq!(missing_tile_slots(4), 1);
+    assert_eq!(missing_tile_slots(5), 0);
+    assert_eq!(missing_tile_slots(6), 0);
+}
+
 /// A query that filtered out every slot yields an empty `render_order`,
 /// which must render a "no matches" message rather than an empty grid.
 #[test]
 fn grid_shows_no_matches_message_for_empty_render_order() {
+    let _gui = gui_lock();
     let slots = SlotMap::default();
     let sounds: Vec<SoundEntry> = Vec::new();
     let macros = MacroStore::default();

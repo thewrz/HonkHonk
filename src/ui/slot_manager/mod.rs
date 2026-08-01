@@ -68,12 +68,23 @@ fn bound_count(slots: &SlotMap) -> usize {
 /// shows a macro name goes through here so the assignment list, the slot
 /// tile and the sidebar agree on what an unnamed macro is called (#169
 /// review).
-pub(super) fn display_name(macro_def: &Macro) -> &str {
+pub(crate) fn display_name(macro_def: &Macro) -> &str {
     if macro_def.name.trim().is_empty() {
         "Untitled macro"
     } else {
         &macro_def.name
     }
+}
+
+/// Tiles per grid row. The slot map is a fixed 20 slots, so an unfiltered
+/// grid is exactly four full rows; filtering is what makes a partial row
+/// possible (see `slot_grid`).
+const SLOT_COLUMNS: usize = 5;
+
+/// Filler tiles needed to complete a row holding `tiles_in_row` real tiles.
+/// Mirrors `sound_grid::missing_tile_slots`.
+fn missing_tile_slots(tiles_in_row: usize) -> usize {
+    SLOT_COLUMNS.saturating_sub(tiles_in_row)
 }
 
 pub(super) fn tone_for(sound: &SoundEntry) -> Tone {
@@ -206,9 +217,9 @@ fn slot_grid<'a>(ctx: &SlotManagerCtx<'a>, render_order: &[u8], t: Theme) -> Ele
     }
 
     let rows: Vec<Element<'a, Message>> = render_order
-        .chunks(5)
+        .chunks(SLOT_COLUMNS)
         .map(|chunk| {
-            let tiles: Vec<Element<'a, Message>> = chunk
+            let mut tiles: Vec<Element<'a, Message>> = chunk
                 .iter()
                 .map(|&idx| {
                     let view = resolve_slot(idx, ctx);
@@ -216,6 +227,17 @@ fn slot_grid<'a>(ctx: &SlotManagerCtx<'a>, render_order: &[u8], t: Theme) -> Ele
                     slot_tile(idx, view, trigger, ctx.selected_slot == Some(idx), t)
                 })
                 .collect();
+
+            // A filtered grid can end on a partial row. Every tile is
+            // `Length::Fill`, so without fillers the survivors would split
+            // the full grid width between them — a single match would render
+            // as one full-width card. Pad to a whole row, as the sound grid
+            // does, so a tile keeps the same width whatever the query.
+            tiles.extend(
+                (0..missing_tile_slots(chunk.len()))
+                    .map(|_| Space::new().width(Length::Fill).into()),
+            );
+
             Row::with_children(tiles).spacing(theme::space::MD).into()
         })
         .collect();
