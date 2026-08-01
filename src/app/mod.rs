@@ -109,6 +109,12 @@ pub struct HonkHonk {
         reason = "read by hotkeys::hotkey_sort_state/hotkey_rows; wired into a view by a follow-up task in this issue's task chain"
     )]
     hotkey_sort: hotkeys::HotkeySortState,
+    /// Slot manager's own sort state (#198). Independent of `hotkey_sort` and
+    /// the tiles view's `sound_sort` — each list-controls view owns its own
+    /// state. Unlike `hotkey_sort`, wired into a `Message`-driven mutator and
+    /// view within this same issue's task chain, so it carries no
+    /// `dead_code` allowance.
+    slot_sort: slots::SlotSortState,
     pub(crate) shortcuts_status: ShortcutsStatus,
     context_menu: Option<String>,
     context_menu_pos: Option<Point>,
@@ -311,6 +317,7 @@ impl HonkHonk {
         let sound_meta = library_scan::load_sound_meta(&scan);
         let sound_sort = sorting::sound_sort_from_config(&config);
         let hotkey_sort = hotkeys::hotkey_sort_from_config(&config);
+        let slot_sort = slots::slot_sort_from_config(&config);
         let sounds = scan.entries;
         let duration_scan_pairs = std::sync::Arc::new(
             sounds
@@ -338,6 +345,7 @@ impl HonkHonk {
             hotkey_filter: FilterState::default(),
             slot_filter: FilterState::default(),
             hotkey_sort,
+            slot_sort,
             shortcuts_status: ShortcutsStatus::Initializing,
             context_menu: None,
             context_menu_pos: None,
@@ -389,6 +397,7 @@ impl HonkHonk {
         let config = AppConfig::default();
         let sound_sort = sorting::sound_sort_from_config(&config);
         let hotkey_sort = hotkeys::hotkey_sort_from_config(&config);
+        let slot_sort = slots::slot_sort_from_config(&config);
         let mut app = Self {
             visible: true,
             exit: false,
@@ -409,6 +418,7 @@ impl HonkHonk {
             hotkey_filter: FilterState::default(),
             slot_filter: FilterState::default(),
             hotkey_sort,
+            slot_sort,
             shortcuts_status: ShortcutsStatus::Initializing,
             context_menu: None,
             context_menu_pos: None,
@@ -809,6 +819,26 @@ impl HonkHonk {
             }
             Message::DismissHotkeySortMenu => {
                 self.dismiss_hotkey_sort_menu();
+                Task::none()
+            }
+            Message::SlotSearchChanged(query) => {
+                self.replace_slot_filter_query(query);
+                Task::none()
+            }
+            Message::ToggleSlotSortMenu => {
+                self.toggle_slot_sort_menu();
+                Task::none()
+            }
+            Message::ToggleSlotSortDirection => {
+                self.toggle_slot_sort_direction();
+                Task::none()
+            }
+            Message::SelectSlotSort(key) => {
+                self.select_slot_sort(key);
+                Task::none()
+            }
+            Message::DismissSlotSortMenu => {
+                self.dismiss_slot_sort_menu();
                 Task::none()
             }
             Message::VolumeChanged(v) => {
