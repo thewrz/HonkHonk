@@ -6,6 +6,7 @@ use crate::ui::theme::{self, Hh, Theme};
 const INPUT_ID: &str = "honkhonk-shared-filter";
 const SETTINGS_INPUT_ID: &str = "honkhonk-settings-filter";
 const HOTKEYS_INPUT_ID: &str = "honkhonk-hotkeys-filter";
+const SLOTS_INPUT_ID: &str = "honkhonk-slots-filter";
 
 #[derive(Clone)]
 struct SearchInputConfig<'a> {
@@ -28,6 +29,11 @@ pub(crate) fn settings_input_id() -> iced::widget::Id {
 /// Returns the stable widget identifier used for hotkeys-section focus and selection.
 pub(crate) fn hotkeys_input_id() -> iced::widget::Id {
     iced::widget::Id::new(HOTKEYS_INPUT_ID)
+}
+
+/// Returns the stable widget identifier used for slot-manager focus and selection.
+pub(crate) fn slots_input_id() -> iced::widget::Id {
+    iced::widget::Id::new(SLOTS_INPUT_ID)
 }
 
 #[allow(
@@ -229,6 +235,30 @@ mod tests {
         assert!(
             debug.contains(HOTKEYS_INPUT_ID),
             "expected hotkeys input id to carry {HOTKEYS_INPUT_ID:?}, got {debug}"
+        );
+    }
+
+    #[test]
+    fn slots_input_id_is_stable_across_calls() {
+        assert_eq!(slots_input_id(), slots_input_id());
+    }
+
+    #[test]
+    fn slots_input_id_is_distinct_from_other_search_inputs() {
+        let slots = slots_input_id();
+
+        assert_ne!(slots, input_id());
+        assert_ne!(slots, settings_input_id());
+        assert_ne!(slots, hotkeys_input_id());
+    }
+
+    #[test]
+    fn slots_input_id_uses_its_dedicated_dom_key() {
+        let debug = format!("{:?}", slots_input_id());
+
+        assert!(
+            debug.contains(SLOTS_INPUT_ID),
+            "expected slots input id to carry {SLOTS_INPUT_ID:?}, got {debug}"
         );
     }
 

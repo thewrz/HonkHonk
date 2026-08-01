@@ -99,6 +99,10 @@ pub struct HonkHonk {
         reason = "read by hotkeys::hotkey_filter_query/hotkey_rows; wired into a view by a follow-up task in this issue's task chain"
     )]
     hotkey_filter: FilterState,
+    /// Slot manager's own search-bar filter query (#198). Independent of the
+    /// main grid's `filter` and Settings' `hotkey_filter` — each list-controls
+    /// view owns its own state.
+    slot_filter: FilterState,
     /// Settings → Shortcuts bindings list sort state (#199).
     #[allow(
         dead_code,
@@ -332,6 +336,7 @@ impl HonkHonk {
             slots,
             slot_triggers: std::array::from_fn(|_| None),
             hotkey_filter: FilterState::default(),
+            slot_filter: FilterState::default(),
             hotkey_sort,
             shortcuts_status: ShortcutsStatus::Initializing,
             context_menu: None,
@@ -402,6 +407,7 @@ impl HonkHonk {
             slots: SlotMap::default(),
             slot_triggers: std::array::from_fn(|_| None),
             hotkey_filter: FilterState::default(),
+            slot_filter: FilterState::default(),
             hotkey_sort,
             shortcuts_status: ShortcutsStatus::Initializing,
             context_menu: None,

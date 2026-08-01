@@ -46,6 +46,7 @@ fn filter_input_id(target: FilterTarget) -> iced::widget::Id {
     match target {
         FilterTarget::Tiles => search_bar::input_id(),
         FilterTarget::Hotkeys => search_bar::hotkeys_input_id(),
+        FilterTarget::Slots => search_bar::slots_input_id(),
     }
 }
 
@@ -83,13 +84,14 @@ impl HonkHonk {
             || self.sort_menu_anchor.is_some()
     }
 
-    /// Returns the `FilterState` owned by `target`. Both fields share a type,
-    /// so this is the single seam that keeps tiles/hotkeys dispatch from
-    /// duplicating match arms across every mutator below.
+    /// Returns the `FilterState` owned by `target`. All three fields share a
+    /// type, so this is the single seam that keeps tiles/hotkeys/slots
+    /// dispatch from duplicating match arms across every mutator below.
     fn filter_state_mut(&mut self, target: FilterTarget) -> &mut FilterState {
         match target {
             FilterTarget::Tiles => &mut self.filter,
             FilterTarget::Hotkeys => &mut self.hotkey_filter,
+            FilterTarget::Slots => &mut self.slot_filter,
         }
     }
 
@@ -103,6 +105,10 @@ impl HonkHonk {
             Some(FilterTarget::Hotkeys) => {
                 self.hotkey_filter.insert(text);
                 iced::widget::operation::focus(filter_input_id(FilterTarget::Hotkeys))
+            }
+            Some(FilterTarget::Slots) => {
+                self.slot_filter.insert(text);
+                iced::widget::operation::focus(filter_input_id(FilterTarget::Slots))
             }
             None => iced::Task::none(),
         }
