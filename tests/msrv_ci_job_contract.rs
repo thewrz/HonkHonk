@@ -248,3 +248,30 @@ fn msrv_cargo_check_is_locked_and_never_mutates_cargo_lock() {
         "cargo check --locked must never mutate Cargo.lock"
     );
 }
+
+/// Regression guard: proving the `msrv` job goes red on a violation requires
+/// temporarily lowering `Cargo.toml`'s `rust-version` below the toolchain
+/// under test, then reverting it (see the issue #226 verification
+/// experiment). If that revert is ever skipped, the mutated file would ride
+/// along uncommitted into the next commit. A working-tree diff against the
+/// git index catches exactly that mistake -- deliberately not a diff against
+/// `origin/main`, since CI's checkout step for the `test` job is a shallow,
+/// single-ref clone with no `main`/`origin/main` ref to resolve, which would
+/// make that comparison error out rather than assert anything.
+#[test]
+fn cargo_toml_has_no_uncommitted_drift_from_the_msrv_verification_experiment() {
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let output = Command::new("git")
+        .args(["diff", "--exit-code", "--", "Cargo.toml"])
+        .current_dir(manifest_dir)
+        .output()
+        .expect("failed to spawn git diff");
+
+    assert!(
+        output.status.success(),
+        "Cargo.toml has uncommitted changes -- if this is left over from the \
+         msrv job's verification experiment (issue #226), revert it before \
+         committing:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
