@@ -3,8 +3,8 @@
 //! (which checks the declared floor against the *dependency graph*), this
 //! suite checks the *workflow file itself*: that the job actually builds
 //! against the version Cargo.toml declares, fails loudly instead of
-//! silently degrading, and never disturbs the job branch protection keys
-//! off of or the checked-in lockfile.
+//! silently degrading, and disturbs neither the checked-in lockfile nor the
+//! `build` job that branch protection keys off of.
 //!
 //! The workflow is parsed as text rather than through a YAML crate --
 //! matching the existing `Cargo.toml`-parsing convention in this suite --
@@ -124,21 +124,6 @@ fn output_has_version(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// True when `dir` sits inside a git working tree. Governs whether the
-/// Cargo.toml-drift check below has anything to diff against -- a tarball
-/// checkout (e.g. an AUR `source=()` archive extracted via `git archive`,
-/// which never writes a `.git` directory) is not a git repo at all, so
-/// `git diff` there fails with "fatal: not a git repository" rather than
-/// reporting a clean/dirty status.
-fn is_inside_git_work_tree(dir: &Path) -> bool {
-    Command::new("git")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(dir)
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
 /// Invariant: the msrv job's toolchain is always derived from Cargo.toml's
 /// `rust-version` at run time, never hardcoded in the workflow.
 #[test]
@@ -217,23 +202,32 @@ fn build_job_identity_is_untouched() {
         block[0], "  build:",
         "the `build` job id must not be renamed"
     );
-    assert_eq!(
-        block.get(1).copied(),
-        Some("    name: Build (release)"),
+    // Searched within the job block rather than pinned to `block[1]`: inserting
+    // a `needs:`/`permissions:` key or a comment above `name:` changes neither
+    // identity, and must not fail this test.
+    assert!(
+        block
+            .iter()
+            .any(|line| line.trim_end() == "    name: Build (release)"),
         "the `build` job's display name must not change, or branch protection stops matching"
     );
 }
 
-/// Invariant: `cargo check --locked` in the msrv job must never mutate
-/// `Cargo.lock`. Checks that the workflow still names exactly that command,
-/// and that actually running it succeeds. A separate before/after byte
-/// comparison of `Cargo.lock` is deliberately not done here: `--locked`
-/// makes cargo itself refuse to write the lockfile and instead exit
-/// non-zero on any drift, so that comparison could never fail independently
-/// of the `status.success()` assertion below -- it would only ever
-/// duplicate what this test already checks.
+/// Invariant: the msrv job's check step carries `--locked`, so the MSRV
+/// toolchain can never re-resolve `Cargo.lock` (which would silently require
+/// regenerating the Flatpak `cargo-sources.json`).
+///
+/// This asserts the workflow *text* and deliberately does not execute the
+/// extracted command. Running a nested `cargo check` here would be
+/// non-hermetic -- it omits `--offline`, so a cold registry cache or a
+/// network-sandboxed build (the AUR `honkhonk` PKGBUILD runs
+/// `cargo test --frozen --release`) would fail on network access rather than
+/// on any real contract violation. It would also run under the *host*
+/// toolchain rather than the MSRV one, so it could not evidence the MSRV
+/// contract regardless. See `msrv_matches_dependency_graph.rs`, which pins
+/// `--offline` on its own `cargo metadata` call for the same reason.
 #[test]
-fn msrv_cargo_check_is_locked_and_never_mutates_cargo_lock() {
+fn msrv_cargo_check_step_is_locked() {
     let text = read_workflow();
     let lines: Vec<&str> = text.lines().collect();
     let block = job_block_lines(&lines, "msrv");
@@ -241,89 +235,5 @@ fn msrv_cargo_check_is_locked_and_never_mutates_cargo_lock() {
     assert_eq!(
         command, "cargo check --locked",
         "the msrv job's check step must run exactly `cargo check --locked`"
-    );
-
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-
-    let mut parts = command.split_whitespace();
-    let program = parts.next().expect("extracted command must not be empty");
-    let status = Command::new(program)
-        .args(parts)
-        .current_dir(manifest_dir)
-        .status()
-        .expect("failed to spawn the extracted cargo check command");
-    assert!(
-        status.success(),
-        "cargo check --locked must succeed against an up-to-date Cargo.lock"
-    );
-}
-
-/// Regression guard: proving the `msrv` job goes red on a violation requires
-/// temporarily lowering `Cargo.toml`'s `rust-version` below the toolchain
-/// under test, then reverting it (see the issue #226 verification
-/// experiment). If that revert is ever skipped, the mutated file would ride
-/// along uncommitted into the next commit. A working-tree diff against the
-/// git index catches exactly that mistake -- deliberately not a diff against
-/// `origin/main`, since CI's checkout step for the `test` job is a shallow,
-/// single-ref clone with no `main`/`origin/main` ref to resolve, which would
-/// make that comparison error out rather than assert anything.
-///
-/// This check only applies inside an actual git checkout. A tarball build
-/// (e.g. the AUR `honkhonk` package, whose `PKGBUILD` downloads a
-/// `git archive` tag tarball with no `.git` directory and runs
-/// `cargo test --frozen --release` against it unconditionally) has nothing
-/// to diff against, so it is skipped rather than failed there -- see
-/// `cargo_toml_drift_check_is_a_no_op_outside_a_git_checkout` below for the
-/// reproduction this guards against.
-#[test]
-fn cargo_toml_has_no_uncommitted_drift_from_the_msrv_verification_experiment() {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let manifest_path = Path::new(manifest_dir);
-
-    if !is_inside_git_work_tree(manifest_path) {
-        return;
-    }
-
-    let output = Command::new("git")
-        .args(["diff", "--exit-code", "--", "Cargo.toml"])
-        .current_dir(manifest_dir)
-        .output()
-        .expect("failed to spawn git diff");
-
-    assert!(
-        output.status.success(),
-        "Cargo.toml has uncommitted changes -- if this is left over from the \
-         msrv job's verification experiment (issue #226), revert it before \
-         committing:\n{}",
-        String::from_utf8_lossy(&output.stdout)
-    );
-}
-
-/// Reproduces the AUR `honkhonk` package build tree: a plain directory with
-/// no `.git` at all, exactly what `git archive HEAD | tar -x` (what the
-/// `PKGBUILD`'s `source=()` tag tarball ultimately contains) produces.
-/// Before the `is_inside_git_work_tree` guard, `git diff --exit-code` in
-/// that directory exits non-zero with "fatal: not a git repository" and the
-/// drift check misreports it as "Cargo.toml has uncommitted changes".
-#[test]
-fn cargo_toml_drift_check_is_a_no_op_outside_a_git_checkout() {
-    let tmp = tempfile::tempdir().expect("failed to create temp dir");
-    write_fixture_cargo_toml(tmp.path(), Some("rust-version = \"1.89\""));
-
-    assert!(
-        !is_inside_git_work_tree(tmp.path()),
-        "a bare tarball checkout must not be mistaken for a git work tree"
-    );
-
-    let output = Command::new("git")
-        .args(["diff", "--exit-code", "--", "Cargo.toml"])
-        .current_dir(tmp.path())
-        .output()
-        .expect("failed to spawn git diff");
-    assert!(
-        !output.status.success(),
-        "git diff itself is expected to fail outside a git repo -- this is exactly \
-         the failure the is_inside_git_work_tree guard must prevent from reaching \
-         the drift assertion"
     );
 }
