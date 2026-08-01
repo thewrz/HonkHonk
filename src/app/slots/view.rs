@@ -65,6 +65,21 @@ mod tests {
         assert!(app.view_slot_sort_overlay(Theme::Light).is_none());
     }
 
+    /// Slot manager is active but no sort menu was ever opened: the anchor
+    /// guard alone must suppress the overlay. Without this test, dropping
+    /// the `sort_menu_anchor?` early return (e.g. an accidental merge with
+    /// the hotkeys overlay variant) would go undetected — every other test
+    /// in this file pairs `ViewMode::SlotManager` only with an anchor that
+    /// is `Some`.
+    #[test]
+    fn overlay_hidden_in_slot_manager_with_no_anchor_set() {
+        let mut app = HonkHonk::new_for_test();
+        app.view_mode = ViewMode::SlotManager;
+        assert_eq!(app.sort_menu_anchor, None, "setup: anchor should be unset");
+
+        assert!(app.view_slot_sort_overlay(Theme::Light).is_none());
+    }
+
     #[test]
     fn overlay_hidden_when_anchor_set_but_a_different_view_is_active() {
         let mut app = HonkHonk::new_for_test();
