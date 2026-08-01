@@ -103,6 +103,28 @@ where
     )
 }
 
+/// Builds the slot-manager search (type-to-filter activated) using the same
+/// stable input stack.
+pub fn view_slots_search_bar<'a, Message>(
+    query: &'a str,
+    t: Theme,
+    on_input: impl Fn(String) -> Message + 'a,
+) -> Element<'a, Message>
+where
+    Message: Clone + 'a,
+{
+    view_search_input(
+        query,
+        SearchInputConfig {
+            placeholder: "Search slots\u{2026}",
+            id: slots_input_id(),
+            width: Length::Fill,
+            theme: t,
+        },
+        on_input,
+    )
+}
+
 fn view_search_input<'a, Message>(
     query: &'a str,
     config: SearchInputConfig<'a>,
@@ -272,5 +294,17 @@ mod tests {
     fn view_hotkeys_search_bar_builds_for_populated_query() {
         let _element: Element<'_, TestMessage> =
             view_hotkeys_search_bar("mute", Theme::Dark, TestMessage::Input);
+    }
+
+    #[test]
+    fn view_slots_search_bar_builds_for_empty_query() {
+        let _element: Element<'_, TestMessage> =
+            view_slots_search_bar("", Theme::Dark, TestMessage::Input);
+    }
+
+    #[test]
+    fn view_slots_search_bar_builds_for_populated_query() {
+        let _element: Element<'_, TestMessage> =
+            view_slots_search_bar("airhorn", Theme::Dark, TestMessage::Input);
     }
 }
