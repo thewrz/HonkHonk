@@ -152,14 +152,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          LINE=$(grep -m1 '^rust-version' Cargo.toml || true)
+          # Require the `=` so a hypothetical `rust-version-foo` key cannot
+          # satisfy the prefix match and feed a bogus toolchain downstream.
+          LINE=$(grep -m1 '^rust-version[[:space:]]*=' Cargo.toml || true)
           if [ -z "$LINE" ]; then
             echo "::error::Cargo.toml has no package.rust-version line"
             exit 1
           fi
           VERSION=$(echo "$LINE" | cut -d'"' -f2)
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-            echo "::error::could not parse a valid rust-version from: $LINE"
+            echo "::error::could not parse a valid rust-version from: $LINE (expected a double-quoted MAJOR.MINOR[.PATCH] value)"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
