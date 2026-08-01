@@ -126,6 +126,36 @@ fn dangling_and_empty_slots_share_a_fully_blank_haystack() {
     }
 }
 
+/// `Name` and `Tag` must treat a blank value as "unknown" -- mirroring how
+/// `Length`/`Modified`/`Added` already treat their `Option` fields -- because
+/// a blank `display_name`/`tag` *is* the dangling/empty-slot signal
+/// (`rows.rs`'s own doc comment). Without this, a dangling/empty row sorts by
+/// plain string comparison instead of being routed last regardless of
+/// `Direction`.
+#[test]
+fn name_and_tag_treat_a_blank_value_as_unknown() {
+    let app = app_with_mixed_slots();
+    let built = rows::build_slot_rows(&app);
+
+    let named = built
+        .iter()
+        .find(|row| row.slot_index == 0)
+        .expect("slot 0 is populated by the fixture");
+    assert!(!named.display_name.is_empty());
+    assert!(!named.tag.is_empty());
+    assert!(!SlotSortKey::Name.value_unknown(named));
+    assert!(!SlotSortKey::Tag.value_unknown(named));
+
+    let blank = built
+        .iter()
+        .find(|row| row.slot_index == 3)
+        .expect("slot 3 is left empty by the fixture");
+    assert!(blank.display_name.is_empty());
+    assert!(blank.tag.is_empty());
+    assert!(SlotSortKey::Name.value_unknown(blank));
+    assert!(SlotSortKey::Tag.value_unknown(blank));
+}
+
 /// `SlotSortKey::SlotNumber` never treats a row as "unknown" (every slot has
 /// a slot index by construction). Its own `tie_break` -- reachable when
 /// resolving ties for *any* key, e.g. two rows sharing a blank `Tag` -- always

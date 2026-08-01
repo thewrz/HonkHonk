@@ -110,6 +110,63 @@ fn empty_query_returns_every_slot() {
     assert_eq!(app.slot_rows().len(), 20);
 }
 
+/// The composed-API cardinality invariant, checked through the actual method
+/// the invariant names (`slot_rows()`/`slot_render_order()`) rather than only
+/// through the disconnected `rows::build_slot_rows` + `SortState::sorted`
+/// primitives (`sort_tests.rs`'s `sort_reorders_render_only` covers those in
+/// isolation): under an empty query, every one of the 20 fixed slot indices
+/// appears in `slot_render_order()` exactly once -- no duplicate, no drop --
+/// for every sort key and direction.
+#[test]
+fn slot_render_order_has_no_duplicate_or_dropped_slot_under_an_empty_query() {
+    let mut expected: Vec<u8> = (0..20).collect();
+
+    for key in SlotSortKey::ALL {
+        for direction in [Direction::Ascending, Direction::Descending] {
+            let mut app = app_with_two_sounds();
+            app.slot_sort = SlotSortState::new(key, direction);
+
+            let mut order = app.slot_render_order();
+            assert_eq!(
+                order.len(),
+                20,
+                "key {key:?} direction {direction:?}: expected exactly 20 rows"
+            );
+            order.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(
+                order, expected,
+                "key {key:?} direction {direction:?}: every slot index must appear exactly once"
+            );
+        }
+    }
+}
+
+/// Dangling/empty rows must sort last regardless of `Direction` (the pinned
+/// `value_unknown` invariant on `SlotSortKey::Name`/`Tag`), never flip
+/// position with the two named rows depending on ascending/descending.
+#[test]
+fn blank_rows_sort_last_by_name_regardless_of_direction() {
+    let mut app = app_with_two_sounds();
+
+    for direction in [Direction::Ascending, Direction::Descending] {
+        app.slot_sort = SlotSortState::new(SlotSortKey::Name, direction);
+        let order = app.slot_render_order();
+
+        let mut named_positions: Vec<u8> = order[..2].to_vec();
+        named_positions.sort_unstable();
+        assert_eq!(
+            named_positions,
+            vec![0, 5],
+            "direction {direction:?}: the two named slots must land first"
+        );
+        assert!(
+            order[2..].iter().all(|idx| *idx != 0 && *idx != 5),
+            "direction {direction:?}: blank slots must occupy every later position"
+        );
+    }
+}
+
 #[test]
 fn accessors_mirror_the_underlying_filter_and_sort_state() {
     let mut app = HonkHonk::new_for_test();

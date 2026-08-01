@@ -158,12 +158,20 @@ impl SortKey<SlotRow> for SlotSortKey {
         left.slot_index.cmp(&right.slot_index)
     }
 
+    /// A blank `display_name`/`tag` *is* the "nothing here" signal for a
+    /// dangling or empty slot (see the module doc and `empty_slot_row`), so
+    /// `Name`/`Tag` must treat it as unknown exactly like the `Option`-typed
+    /// keys below treat `None` — otherwise a dangling/empty row sorts by
+    /// plain (empty-)string comparison and its position flips with
+    /// `Direction` instead of landing last every time.
     fn value_unknown(self, row: &SlotRow) -> bool {
         match self {
             Self::Length => row.duration_ms.is_none(),
             Self::Modified => row.modified_ms.is_none(),
             Self::Added => row.added_ms.is_none(),
-            Self::SlotNumber | Self::Name | Self::Tag => false,
+            Self::Name => row.display_name.is_empty(),
+            Self::Tag => row.tag.is_empty(),
+            Self::SlotNumber => false,
         }
     }
 }
