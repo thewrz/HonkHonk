@@ -145,16 +145,26 @@ jobs:
     name: MSRV (build)
     runs-on: ubuntu-latest
     steps:
+      # This job only reads the repo -- it never pushes -- so the GITHUB_TOKEN
+      # must not be persisted into .git/config for later steps to pick up.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Read declared MSRV from Cargo.toml
         id: read-msrv
         shell: bash
         run: |
           set -euo pipefail
-          # Require the `=` so a hypothetical `rust-version-foo` key cannot
+          # Scoped to the `[package]` table: a bare `^rust-version` grep would
+          # also match a `[workspace.package]` (or any other) table's key and
+          # silently install a toolchain `[package]` never declared. Require
+          # the `=` too, so a hypothetical `rust-version-foo` key cannot
           # satisfy the prefix match and feed a bogus toolchain downstream.
-          LINE=$(grep -m1 '^rust-version[[:space:]]*=' Cargo.toml || true)
+          LINE=$(awk '
+            /^\[/ { in_package = ($0 ~ /^\[package\][[:space:]]*$/); next }
+            in_package && /^rust-version[[:space:]]*=/ { print; exit }
+          ' Cargo.toml)
           if [ -z "$LINE" ]; then
             echo "::error::Cargo.toml has no package.rust-version line"
             exit 1

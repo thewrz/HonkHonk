@@ -76,6 +76,10 @@ fn run_command_for_step<'a>(block: &[&'a str], step_name: &str) -> &'a str {
         .iter()
         .find_map(|line| line.trim_start().strip_prefix("run:"))
         .map(str::trim)
+        // A `run: |` block scalar strips to a bare `|`, which is a *shape*
+        // change, not a command -- reject it so the panic below names the
+        // real problem instead of returning "|" as if it were the command.
+        .filter(|command| !command.is_empty() && *command != "|")
         .unwrap_or_else(|| panic!("step `{step_name}` has no single-line `run:` command"))
 }
 
@@ -189,6 +193,41 @@ fn read_msrv_step_fails_loudly_on_missing_or_malformed_version() {
     assert_eq!(emitted.trim(), "version=1.89");
 }
 
+/// Invariant: the read-msrv step reads `[package].rust-version` specifically,
+/// never some other table's key. A manifest that grows a `[workspace.package]`
+/// table above `[package]` must not silently install a toolchain that
+/// `[package]` does not declare -- the failure would be invisible, since the
+/// wrong value still satisfies the version regex.
+#[test]
+fn read_msrv_step_reads_only_the_package_table() {
+    let text = read_workflow();
+    let lines: Vec<&str> = text.lines().collect();
+    let block = job_block_lines(&lines, "msrv");
+    let script = extract_run_block(&block, "Read declared MSRV from Cargo.toml");
+
+    let tmp = tempfile::tempdir().expect("failed to create temp dir");
+    let output_path = tmp.path().join("github_output");
+    std::fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[workspace.package]\nrust-version = \"1.70\"\n\n\
+         [package]\nname = \"fixture\"\nversion = \"0.1.0\"\nrust-version = \"1.89\"\n",
+    )
+    .expect("failed to write fixture Cargo.toml");
+
+    let output = run_extracted_script(&script, tmp.path(), &output_path);
+    assert!(
+        output.status.success(),
+        "a manifest with both tables must still resolve a version"
+    );
+    let emitted =
+        std::fs::read_to_string(&output_path).expect("GITHUB_OUTPUT must exist on success");
+    assert_eq!(
+        emitted.trim(),
+        "version=1.89",
+        "must read [package].rust-version, not [workspace.package]'s"
+    );
+}
+
 /// Invariant: the existing `build` job is untouched, so branch protection's
 /// required status check (which matches on job id and/or display name)
 /// keeps matching.
@@ -196,12 +235,15 @@ fn read_msrv_step_fails_loudly_on_missing_or_malformed_version() {
 fn build_job_identity_is_untouched() {
     let text = read_workflow();
     let lines: Vec<&str> = text.lines().collect();
-    let block = job_block_lines(&lines, "build");
-
-    assert_eq!(
-        block[0], "  build:",
+    // Asserted before `job_block_lines`, which panics on a missing header:
+    // a rename must fail with the consequence (branch protection stops
+    // matching), not with a generic "job not found" from the helper.
+    assert!(
+        lines.contains(&"  build:"),
         "the `build` job id must not be renamed"
     );
+    let block = job_block_lines(&lines, "build");
+
     // Searched within the job block rather than pinned to `block[1]`: inserting
     // a `needs:`/`permissions:` key or a comment above `name:` changes neither
     // identity, and must not fail this test.
