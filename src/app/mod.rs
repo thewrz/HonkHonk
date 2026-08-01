@@ -1513,6 +1513,7 @@ impl HonkHonk {
             ViewMode::SlotManager => {
                 let t = self.config.theme;
                 slot_manager::view_slot_manager(
+                    self,
                     slot_manager::SlotManagerCtx {
                         slots: &self.slots,
                         slot_triggers: &self.slot_triggers,

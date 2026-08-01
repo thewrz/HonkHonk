@@ -197,10 +197,6 @@ impl HonkHonk {
 /// The slot manager grid's pure query surface (#198): filtered, sorted rows
 /// and the individual pieces of state they're built from. Mirrors
 /// `hotkeys::hotkey_rows`/`hotkey_filter_query`/`hotkey_sort_state` exactly.
-#[allow(
-    dead_code,
-    reason = "query surface for #198; wired into the slot manager view by a follow-up task in this issue's chain"
-)]
 impl HonkHonk {
     /// Every fixed slot ([`rows::build_slot_rows`]), narrowed by
     /// `slot_filter`'s query, then reordered by `slot_sort` — filtering

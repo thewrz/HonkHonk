@@ -18,10 +18,6 @@ impl HonkHonk {
     /// manager is the view currently on screen — otherwise a menu opened on
     /// the slot manager would keep rendering after switching views (or the
     /// anchor is stale from another view's sort menu).
-    #[allow(
-        dead_code,
-        reason = "wired into ui::slot_manager::view_slot_manager by a follow-up task in this issue's task chain"
-    )]
     pub(crate) fn view_slot_sort_overlay(&self, theme: Theme) -> Option<Element<'_, Message>> {
         if self.view_mode != ViewMode::SlotManager {
             return None;

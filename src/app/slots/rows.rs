@@ -8,11 +8,6 @@
 //! `build_slot_rows` is total: it always returns exactly one row per slot,
 //! in slot order.
 
-#![allow(
-    dead_code,
-    reason = "row model for #198; wired into slots.rs's slot_rows()/slot_render_order() by a follow-up task in this chain"
-)]
-
 use std::cmp::Ordering;
 use std::path::Path;
 
