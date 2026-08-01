@@ -20,6 +20,7 @@ mod query_tests;
 mod rows;
 #[cfg(test)]
 mod sort_tests;
+mod view;
 
 /// Sort state for the slot manager grid (#198).
 ///
