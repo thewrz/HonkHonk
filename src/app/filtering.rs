@@ -7,6 +7,8 @@ use crate::ui::search_bar;
 use targets::{FilterTarget, active_filter_target};
 
 mod cache;
+#[cfg(test)]
+mod grid_tests;
 mod targets;
 #[cfg(test)]
 mod tests;
