@@ -76,3 +76,8 @@ sounds/
 
 # Subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# agentkit: per-machine state stays local; only the declarations are trunk-carried
+.agent/*
+!.agent/config.env
+!.agent/board.json

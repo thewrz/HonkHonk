@@ -11,10 +11,11 @@ Wayland-native Linux soundboard. Pure Rust — Iced 0.14 GUI (Elm/MVU) + PipeWir
 
 - **File size: 400 lines max** (stricter than the global default) — split before adding.
   Functions <=50 lines.
-- **Coverage: 80% target** via `cargo tarpaulin` every CI run (diagnostic globally; a target here).
-- **GitHub PRs created by Claude or Codex must be drafts.** Use `gh pr create --draft` or connector
-  `draft: true`; do not create ready-for-review PRs directly.
-- **Known violation:** `src/app.rs` is 2,491 lines. Do NOT add to it — split first.
+- **Coverage: 80% target, not gated.** CI runs no coverage job; `cargo tarpaulin` is a local
+  diagnostic, never a merge gate.
+- **Known violations (400-line cap):** `src/app/mod.rs` is 3,072 lines — the former `src/app.rs`,
+  moved in #159 and still growing. Do NOT add to it — extract a submodule first.
+  `src/audio/engine.rs` (860), `router.rs` (846), `registry.rs` (689) are also over budget.
 
 ## Architecture
 
@@ -25,7 +26,7 @@ Wayland-native Linux soundboard. Pure Rust — Iced 0.14 GUI (Elm/MVU) + PipeWir
 - Renderer: wgpu default, tiny-skia software fallback (`HONKHONK_RENDERER=software`).
 - **Wayland-native only — no X11. PipeWire only — no direct PulseAudio.**
 
-`src/` layout and module responsibilities live in `ARCHITECTURE.md`. `app.rs` is the Iced
+`src/` layout and module responsibilities live in `ARCHITECTURE.md`. `app/mod.rs` is the Iced
 Application (state/update/view) — no business logic; it delegates to module APIs.
 
 ## Build
@@ -45,14 +46,15 @@ libpipewire-0.3-dev libwayland-dev build-essential`.
 
 **Error context chains.** Every error carries the full "why" from origin to surface.
 - `thiserror` — typed error enum per module boundary (`AudioError`, `PortalError`, `ConfigError`).
-- `anyhow` — `.context("what was happening")` at every `?` in `app.rs` / top-level glue.
+- `anyhow` — `.context("what was happening")` at every `?` in `app/` / top-level glue.
 - No `String` errors across module boundaries. No `.unwrap()` / `panic!()` in non-test code.
 - App-level catches errors and surfaces them as `Message::AudioEvent(AudioEvent::Error(..))`.
 
 **Complexity lints (`clippy.toml`):** cognitive-complexity 10 · too-many-arguments 5 ·
-too-many-lines 50 · type-complexity 200. `cargo clippy -- -D warnings` must pass clean.
+too-many-lines 50 · type-complexity 200. `cargo clippy --all-targets --all-features -- -D warnings`
+(what CI enforces) must pass clean.
 
-**Cargo tooling:** `cargo deny check` (licenses/advisories/dupes) + `cargo tarpaulin` every CI run;
+**Cargo tooling:** `cargo deny check` (licenses/advisories/dupes) every CI run;
 `cargo machete` / `cargo udeps` / `cargo bloat` pre-release. A new crate needs a PR comment
 justifying why stdlib/existing deps cannot do it; a new system `-dev` dep must update
 `.github/workflows/*.yml` in the same PR so CI does not break.
@@ -81,4 +83,3 @@ Tray uses StatusNotifierItem (SNI) via ksni — no XEmbed, no GTK/appindicator t
 
 `cargo test` covers audio engine, config, library, and app-state; `--features pipewire-test` runs the
 play-sound-to-virtual-mic integration path. Do not test Iced view rendering or third-party internals.
-TDD is mandatory (global rule) — failing test first, pin every bugfix with a regression test.
