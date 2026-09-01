@@ -200,7 +200,7 @@ fn decode_repairs_dead_stereo_lane_before_returning_pcm() {
     assert_eq!(audio.channels, 2);
     assert_eq!(audio.samples.len(), input_frames.len() * 2);
     assert_eq!(audio.duration, std::time::Duration::from_millis(50));
-    for frame in audio.samples.chunks_exact(2) {
+    for frame in audio.samples.as_chunks::<2>().0 {
         assert_eq!(
             frame[0].to_bits(),
             frame[1].to_bits(),
