@@ -13,6 +13,7 @@ impl HonkHonk {
         self.import.cancel.store(true, Ordering::Relaxed);
         self.stop_import_preview();
         self.import = ImportState {
+            active_scan: self.import.active_scan,
             epoch: self.import.epoch.wrapping_add(1),
             preview: self.import.preview,
             ..Default::default()

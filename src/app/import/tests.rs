@@ -135,7 +135,11 @@ fn rescanning_preserves_edits_but_refreshes_analysis() {
     let _ = app.update_import(ImportMessage::Open);
     app.import.report.rows = vec![row()];
     app.import.report.rows[0].name = "Edited".into();
-    app.import.scanning = true;
+    let _ = app.scan_import();
+    let first_epoch = app.import.epoch;
+    let _ = app.update_import(ImportMessage::Drop("/another.wav".into()));
+    let next = app.update_import(ImportMessage::Scanned(first_epoch, ScanReport::default()));
+    assert_eq!(next.units(), 1);
     let mut refreshed = row();
     refreshed.analysis.duration_ms = 1500;
     let report = ScanReport {

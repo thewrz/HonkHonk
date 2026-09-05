@@ -4,6 +4,11 @@ Open **Import**, choose a folder through the FileChooser portal, enter a folder
 path, or drop files/folders onto the existing window. Scanning and audio analysis
 run off the UI thread. Selecting another folder or cancelling invalidates pending
 results. Neither scanning nor cancellation changes the library or source files.
+Only one scan worker runs at a time, including across closing and reopening the
+review. Drops arriving during a scan accumulate into one pending source set;
+the current worker is cancelled and its completion starts the latest scan.
+The source set accepts at most 1,000 distinct paths. Additional drops display a
+limit warning; choosing a replacement folder or closing the review resets it.
 
 The review lists filename-derived names, parent-folder categories, duration and
 source size. Select/exclude individual files, edit names/categories, cycle a row's
