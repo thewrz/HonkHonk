@@ -67,8 +67,7 @@ pub fn view_groups<'a>(
                 |body, (tag, indices)| {
                     body.push(
                         text(tag.clone().unwrap_or_else(|| "Untagged".into()))
-                            .size(theme::font::BODY)
-                            .color(Theme::Dark.ink()),
+                            .size(theme::font::BODY),
                     )
                     .push(view_grid_columns(sounds, indices, playing, grid, columns))
                 },
