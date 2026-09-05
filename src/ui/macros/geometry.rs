@@ -21,10 +21,29 @@ pub fn assign_lanes(intervals: &[(u64, u64)]) -> Vec<usize> {
     lanes
 }
 
-pub fn time_at(x: f32, grab: f32, scale: f32, snap: bool) -> u64 {
-    let time = ((x - grab).max(0.0) / scale.max(0.000_001)) as f64;
+pub fn time_at(x: f32, grab: f32, scale: f64, snap: bool) -> u64 {
+    if !scale.is_finite() || scale <= 0.0 {
+        return 0;
+    }
+    let time = f64::from((x - grab).max(0.0)) / scale;
     let quantum = if snap { 50.0 } else { 1.0 };
     ((time / quantum).round() * quantum) as u64
+}
+
+/// At most 101 ruler ticks, independent of persisted duration or offset.
+/// Normal timelines retain one-second ticks; long timelines use wider spacing.
+pub fn ruler_ticks(width: f32, scale: f64) -> Vec<(f32, u64)> {
+    if !scale.is_finite() || scale <= 0.0 || !width.is_finite() {
+        return Vec::new();
+    }
+    let interval = (f64::from(width) / scale / 1000.0 / 100.0).ceil().max(1.0);
+    (0..=100)
+        .filter_map(|index| {
+            let second = (f64::from(index) * interval) as u64;
+            let x = (second as f64 * 1000.0 * scale) as f32;
+            (x <= width).then_some((x, second))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -48,6 +67,27 @@ mod tests {
         assert_eq!(time_at(10.0, 30.0, 0.1, true), 0);
         assert_eq!(time_at(12.6, 0.0, 0.1, true), 150);
         assert_eq!(time_at(12.4, 0.0, 0.1, true), 100);
+    }
+
+    #[test]
+    fn ruler_work_is_bounded_at_normal_and_extreme_scales() {
+        for scale in [0.1, 1.0e-16] {
+            let ticks = ruler_ticks(16_000.0, scale);
+            assert!(!ticks.is_empty() && ticks.len() <= 101);
+            assert!(
+                ticks
+                    .iter()
+                    .all(|(x, _)| x.is_finite() && *x >= 0.0 && *x <= 16_000.0)
+            );
+            assert!(ticks.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        }
+        let normal = ruler_ticks(800.0, 0.1);
+        assert_eq!(normal.len(), 9);
+        assert_eq!(normal[1], (100.0, 1));
+        assert_eq!(
+            time_at(100.0, 0.0, 1.0e-16, false),
+            1_000_000_000_000_000_000
+        );
     }
 
     #[test]
