@@ -92,6 +92,7 @@ impl HonkHonk {
         self.view_mode = ViewMode::Macros;
         self.macro_editor.text_entry_active = false;
         self.macro_editor.dragging = None;
+        self.macro_editor.pointer = None;
         self.macro_editor.menu = None;
         self.macro_editor.sort_open = false;
         self.adopt_macro_draft();
@@ -143,10 +144,12 @@ impl HonkHonk {
         match message {
             EditorMessage::Edit(edit) => self.edit_macro(edit),
             EditorMessage::PaletteDrag(path) => {
-                self.macro_editor.dragging = Some(Drag::Sound(path))
+                self.macro_editor.pointer = None;
+                self.macro_editor.dragging = Some(Drag::Sound(path));
             }
             EditorMessage::MoveStart(index, grab) => {
-                self.macro_editor.dragging = Some(Drag::Step { index, grab })
+                self.macro_editor.pointer = None;
+                self.macro_editor.dragging = Some(Drag::Step { index, grab });
             }
             EditorMessage::Pointer(point) => self.macro_editor.pointer = Some(point),
             EditorMessage::Release(point) => self.release_macro_drag(point),

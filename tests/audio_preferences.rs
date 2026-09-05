@@ -39,16 +39,18 @@ fn fingerprint_preferences_survive_rename_and_restart_without_copying_tags() {
 
 #[test]
 fn force_mono_stereo_and_pan_have_defined_channel_behavior() {
-    use honkhonk::audio::processing::{convert_channels, pan};
-    let source = std::sync::Arc::new(vec![0.6, 0.2, -0.2, 0.6]);
-    let (mono, channels) = convert_channels(&source, 2, OutputMode::Mono);
-    assert_eq!(channels, 1);
-    assert!((mono[0] - 0.4).abs() < 0.0001);
-    let (stereo, channels) = convert_channels(&mono, 1, OutputMode::Stereo);
-    assert_eq!(channels, 2);
-    let mut panned = stereo.as_ref().clone();
-    pan(&mut panned, 2, 1.0);
+    use honkhonk::audio::processing::{ChannelLayout, pan};
+    let source = [0.6, 0.2, -0.2, 0.6];
+    let settings = SoundProcessing {
+        output: OutputMode::Mono,
+        pan: 1.0,
+        ..Default::default()
+    };
+    let layout = ChannelLayout::new(2, settings);
+    let mut panned = [0.0; 4];
+    assert_eq!(layout.fill(&source, &mut panned, 1.0), (4, 4));
+    pan(&mut panned, layout.output_channels(), settings.pan);
     assert_eq!(panned[0], 0.0);
-    assert_eq!(panned[1], mono[0]);
-    assert_eq!(source.as_slice(), &[0.6, 0.2, -0.2, 0.6]);
+    assert!((panned[1] - 0.4).abs() < 0.0001);
+    assert_eq!(source, [0.6, 0.2, -0.2, 0.6]);
 }

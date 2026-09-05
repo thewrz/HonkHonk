@@ -1,5 +1,7 @@
 //! Background loudness measurement and allocation-free playback dynamics.
 mod cache;
+mod channels;
+pub use channels::ChannelLayout;
 mod dynamics;
 mod settings;
 pub use cache::{AudioAnalysis, decode_cached};
@@ -73,31 +75,6 @@ pub fn measure_gain(samples: &[f32], rate: u32, channels: u16) -> Result<f32, Pr
     } else {
         1.0
     })
-}
-
-/// Channel conversion happens on the engine command thread, before the realtime
-/// callback. Preserve leaves stereo imaging intact. Mono is an arithmetic sum.
-pub fn convert_channels(
-    samples: &std::sync::Arc<Vec<f32>>,
-    channels: u16,
-    mode: OutputMode,
-) -> (std::sync::Arc<Vec<f32>>, u16) {
-    match (channels, mode) {
-        (1, OutputMode::Stereo) => (
-            std::sync::Arc::new(samples.iter().flat_map(|s| [*s, *s]).collect()),
-            2,
-        ),
-        (n, OutputMode::Mono) if n > 1 => (
-            std::sync::Arc::new(
-                samples
-                    .chunks_exact(n as usize)
-                    .map(|frame| frame.iter().map(|s| *s / n as f32).sum())
-                    .collect(),
-            ),
-            1,
-        ),
-        _ => (std::sync::Arc::clone(samples), channels),
-    }
 }
 
 /// Balance control: center is unity; positive values attenuate left. For mono,

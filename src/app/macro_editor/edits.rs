@@ -78,7 +78,15 @@ impl HonkHonk {
                 self.edit_macro(Edit::Add(path, time_at(point.x, 0.0, scale, snap)))
             }
             Some(Drag::Step { index, grab }) => {
-                self.edit_macro(Edit::Move(index, time_at(point.x, grab, scale, snap)))
+                let Some(bar) = self.macro_editor.timeline.bars.get(index) else {
+                    return;
+                };
+                let pressed_x = (bar.start as f64 * scale) as f32 + grab;
+                // A click (including subpixel rounding noise) is not an edit.
+                // Compare before snapping so off-grid recorded offsets survive.
+                if (point.x - pressed_x).abs() > 0.5 {
+                    self.edit_macro(Edit::Move(index, time_at(point.x, grab, scale, snap)));
+                }
             }
             None => {}
         }
@@ -110,6 +118,7 @@ impl HonkHonk {
         };
         self.macro_editor.menu = Some(index);
         self.macro_editor.dragging = None;
+        self.macro_editor.pointer = None;
     }
 
     pub(super) fn edit_step_effects(&mut self, message: Message) {

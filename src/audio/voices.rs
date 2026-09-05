@@ -39,7 +39,8 @@ pub struct MixScratch {
 
 impl MixScratch {
     pub fn new(capacity: usize) -> Self {
-        let capacity = capacity.max(1);
+        // Keep room for one complete frame of any supported PipeWire format.
+        let capacity = capacity.max(pipewire::spa::param::audio::MAX_CHANNELS);
         Self {
             dry: vec![0.0; capacity],
             wet: vec![0.0; capacity],
@@ -112,7 +113,8 @@ impl Voice {
             processing: spec.processing,
             sink_dynamics: Dynamics::default(),
             monitor_dynamics: Dynamics::default(),
-            channels: spec.channels,
+            channels: processing::ChannelLayout::new(spec.channels, spec.processing.sound)
+                .output_channels(),
             sound_id: spec.sound_id,
             generation: spec.generation,
             sink_state,
@@ -133,6 +135,7 @@ impl Voice {
             spec.channels,
             spec.gain,
         );
+        state.set_channel_processing(spec.processing.sound);
         Rc::new(RefCell::new(state))
     }
 

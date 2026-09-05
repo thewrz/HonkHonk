@@ -166,3 +166,36 @@ fn audio_command_router_variant_is_constructible() {
     let _ = AudioCommand::Router(RouterCommand::RouteSource { source_node_id: 1 });
     let _ = AudioCommand::Router(RouterCommand::UnrouteSource { source_node_id: 1 });
 }
+
+#[test]
+fn channel_preparation_retains_original_pcm_and_source_format() {
+    let samples = Arc::new(vec![0.6, 0.2, 0.4, 0.0]);
+    let request = PlayRequest {
+        processing: crate::audio::processing::VoiceProcessing {
+            sound: crate::audio::processing::SoundProcessing {
+                output: crate::audio::processing::OutputMode::Mono,
+                pan: 0.5,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        voice_id: 1,
+        sound_id: "source".into(),
+        samples: Arc::clone(&samples),
+        sample_rate: 48_000,
+        channels: 2,
+        generation: 1,
+        gain: 1.0,
+        effects: Default::default(),
+        mode: PlayMode::Concurrent,
+    };
+    let prepared = prepare_channels(request);
+    assert!(
+        Arc::ptr_eq(&samples, &prepared.samples),
+        "play command must not copy PCM"
+    );
+    assert_eq!(
+        prepared.channels, 2,
+        "retain source stride for streaming conversion"
+    );
+}

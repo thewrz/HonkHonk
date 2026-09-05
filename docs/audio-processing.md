@@ -92,3 +92,9 @@ output device are available.
 - [ebur128 measurement API](https://docs.rs/ebur128/0.1.10/ebur128/struct.EbuR128.html)
 - [PipeWire adapter format, rate and channel conversion](https://docs.pipewire.org/devel/page_man_pipewire-props_7.html)
 - [Symphonia conversion and decoder source](https://docs.rs/crate/symphonia/0.5.5/source/)
+
+Channel routing retains the original shared decoded samples. Playback converts
+only complete frames requested by each output buffer, without allocating another
+clip-sized buffer on the PipeWire loop. Progress follows consumed source frames,
+so forcing mono or expanding mono to stereo does not change duration. Sink and
+monitor maintain independent cursors with the same routing and processing.

@@ -172,13 +172,15 @@ fn handle_play(ctx: &EngineCtx, req: PlayRequest) {
         return;
     }
     let req = prepare_channels(req);
+    let output_channels =
+        super::processing::ChannelLayout::new(req.channels, req.processing.sound).output_channels();
     let format_fallback = req.mode == PlayMode::Concurrent
-        && active_format_conflict(ctx, req.sample_rate, req.channels);
+        && active_format_conflict(ctx, req.sample_rate, output_channels);
     if req.mode == PlayMode::Interrupt || format_fallback {
         let finished = ctx.voices.borrow_mut().stop_all();
         send_finished_events(&ctx.evt_tx, finished);
     }
-    if !ensure_playback_streams(ctx, req.sample_rate, req.channels) {
+    if !ensure_playback_streams(ctx, req.sample_rate, output_channels) {
         finish_failed_play(ctx, req);
         return;
     }
@@ -186,14 +188,7 @@ fn handle_play(ctx: &EngineCtx, req: PlayRequest) {
 }
 
 fn prepare_channels(mut req: PlayRequest) -> PlayRequest {
-    use crate::audio::processing::{OutputMode, convert_channels};
     req.processing.sound = req.processing.sound.sanitized();
-    (req.samples, req.channels) =
-        convert_channels(&req.samples, req.channels, req.processing.sound.output);
-    if req.channels == 1 && req.processing.sound.pan != 0.0 {
-        (req.samples, req.channels) =
-            convert_channels(&req.samples, req.channels, OutputMode::Stereo);
-    }
     req
 }
 
