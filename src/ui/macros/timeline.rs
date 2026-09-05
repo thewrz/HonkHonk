@@ -1,5 +1,5 @@
 //! Persistent static geometry, with an uncached playhead/drag overlay (ADR-009).
-use super::geometry::{assign_lanes, time_at};
+use super::geometry::{assign_lanes, ruler_ticks, time_at};
 use crate::app::Message;
 use crate::app::macro_editor::{Drag, EditorMessage, EditorState};
 use crate::state::{Macro, SoundEntry};
@@ -9,6 +9,7 @@ use iced::{Color, Point, Rectangle, Renderer, Size, Theme, mouse};
 
 const LANE_HEIGHT: f32 = 38.0;
 const RULER: f32 = 25.0;
+const MAX_WIDTH: f64 = 16_000.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Bar {
@@ -22,7 +23,7 @@ pub(crate) struct Bar {
 pub(crate) struct TimelineState {
     cache: Cache,
     pub bars: Vec<Bar>,
-    pub scale: f32,
+    pub scale: f64,
     theme: AppTheme,
 }
 
@@ -63,31 +64,35 @@ impl TimelineState {
             self.cache.clear();
             self.bars = bars;
             self.theme = theme;
+            // Reserve two pixels for the minimum-width placeholder at the end.
+            self.scale = ((MAX_WIDTH - 2.0) / (self.end_ms() + 3000.0)).min(0.1);
         }
     }
 
     pub fn size(&self) -> Size {
-        let end = self
-            .bars
-            .iter()
-            .map(|b| b.start.saturating_add(b.duration))
-            .max()
-            .unwrap_or(0);
         let lanes = self.bars.iter().map(|b| b.lane + 1).max().unwrap_or(1);
         Size::new(
-            ((end as f32 + 3000.0) * self.scale).max(800.0),
+            (((self.end_ms() + 3000.0) * self.scale + 2.0).clamp(800.0, MAX_WIDTH)) as f32,
             (lanes as f32 * LANE_HEIGHT + RULER).max(240.0),
         )
+    }
+
+    fn end_ms(&self) -> f64 {
+        // Convert before adding so even start + duration > u64::MAX fits.
+        self.bars
+            .iter()
+            .map(|bar| bar.start as f64 + bar.duration as f64)
+            .fold(0.0, f64::max)
     }
 
     pub(super) fn rectangle(&self, bar: &Bar) -> Rectangle {
         Rectangle::new(
             Point::new(
-                bar.start as f32 * self.scale,
+                (bar.start as f64 * self.scale) as f32,
                 RULER + bar.lane as f32 * LANE_HEIGHT,
             ),
             Size::new(
-                (bar.duration as f32 * self.scale).max(2.0),
+                ((bar.duration as f64 * self.scale) as f32).max(2.0),
                 LANE_HEIGHT - 5.0,
             ),
         )
@@ -132,7 +137,7 @@ impl canvas::Program<Message> for Timeline<'_> {
             .draw(renderer, bounds.size(), |frame| draw_bars(frame, state));
         let mut overlay = Frame::new(renderer, bounds.size());
         if self.editor.preview_start.is_some() {
-            let x = self.editor.playhead_ms as f32 * state.scale;
+            let x = (self.editor.playhead_ms as f64 * state.scale) as f32;
             overlay.stroke(
                 &Path::line(Point::new(x, 0.0), Point::new(x, bounds.height)),
                 Stroke::default()
@@ -177,7 +182,8 @@ impl Timeline<'_> {
                 let point = point?;
                 let index = self.editor.timeline.hit(point)?;
                 let grab = point.x
-                    - self.editor.timeline.bars[index].start as f32 * self.editor.timeline.scale;
+                    - (self.editor.timeline.bars[index].start as f64 * self.editor.timeline.scale)
+                        as f32;
                 Some(EditorMessage::MoveStart(index, grab))
             }
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
@@ -244,15 +250,17 @@ impl Timeline<'_> {
 
 fn draw_bars(frame: &mut Frame, state: &TimelineState) {
     frame.fill_rectangle(Point::ORIGIN, frame.size(), state.theme.panel());
-    let seconds = (frame.width() / (1000.0 * state.scale)) as u64;
-    for second in 0..=seconds {
-        let x = second as f32 * 1000.0 * state.scale;
+    for (x, second) in ruler_ticks(frame.width(), state.scale) {
         frame.stroke(
             &Path::line(Point::new(x, RULER), Point::new(x, frame.height())),
             Stroke::default().with_color(state.theme.hairline()),
         );
         frame.fill_text(canvas::Text {
-            content: format!("{second}s"),
+            content: if second < 1_000_000 {
+                format!("{second}s")
+            } else {
+                format!("{:.1e}s", second as f64)
+            },
             position: Point::new(x + 3.0, 2.0),
             color: state.theme.ink(),
             size: 12.0.into(),
