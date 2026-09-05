@@ -7,6 +7,7 @@ use std::sync::atomic::AtomicBool;
 mod actions;
 mod edits;
 mod preview;
+mod scanning;
 mod view;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,6 +41,9 @@ pub enum ImportMessage {
 pub(super) struct ImportState {
     pub open: bool,
     pub scanning: bool,
+    pub active_scan: Option<u64>,
+    pub pending_scan: bool,
+    pub source_limit: bool,
     pub busy: bool,
     pub epoch: u64,
     pub preview: u64,
@@ -57,6 +61,9 @@ impl HonkHonk {
         if let ImportMessage::Confirmed(epoch, path, report) = message {
             return self.import_confirmed(epoch, path, report);
         }
+        if let ImportMessage::Scanned(epoch, report) = message {
+            return self.import_scanned(epoch, report);
+        }
         if self.import.busy {
             return Task::none();
         }
@@ -65,13 +72,7 @@ impl HonkHonk {
                 self.open_import();
                 Task::none()
             }
-            ImportMessage::Drop(path) => {
-                self.open_import();
-                if !self.import.sources.contains(&path) {
-                    self.import.sources.push(path);
-                }
-                self.scan_import()
-            }
+            ImportMessage::Drop(path) => self.drop_import(path),
             ImportMessage::Cancel => {
                 self.close_import();
                 Task::none()
@@ -79,15 +80,12 @@ impl HonkHonk {
             _ if !self.import.open => Task::none(),
             ImportMessage::Scan => {
                 self.import.sources = vec![PathBuf::from(&self.import.path)];
+                self.import.source_limit = false;
                 self.import.report = ScanReport::default();
                 self.scan_import()
             }
             ImportMessage::Pick => self.pick_import(),
             ImportMessage::Picked(epoch, result) => self.import_picked(epoch, result),
-            ImportMessage::Scanned(epoch, report) => {
-                self.import_scanned(epoch, report);
-                Task::none()
-            }
             ImportMessage::Confirm => self.confirm_import(),
             ImportMessage::Preview(index) => self.preview_import(index),
             ImportMessage::Previewed(epoch, generation, result) => {
@@ -104,3 +102,6 @@ impl HonkHonk {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod scan_tests;
