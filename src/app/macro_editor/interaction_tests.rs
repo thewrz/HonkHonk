@@ -10,6 +10,42 @@ fn editor() -> HonkHonk {
 }
 
 #[test]
+fn clicking_off_grid_step_preserves_time_but_dragging_still_snaps() {
+    let mut app = editor();
+    let _ = app.update(Message::MacroEditor(EditorMessage::Edit(Edit::Add(
+        "/a.wav".into(),
+        1234,
+    ))));
+    let id = app.macro_editor.active.clone().unwrap();
+    let press = Point::new(143.4, 30.0);
+    let _ = app.update(Message::MacroEditor(EditorMessage::MoveStart(0, 20.0)));
+    let _ = app.update(Message::MacroEditor(EditorMessage::Release(Some(press))));
+    assert_eq!(app.macros.get(&id).unwrap().steps[0].start_offset_ms, 1234);
+    assert!(app.macro_editor.dragging.is_none());
+    assert!(app.macro_editor.pointer.is_none());
+
+    let _ = app.update(Message::MacroEditor(EditorMessage::MoveStart(0, 20.0)));
+    let moved = Point::new(153.4, 30.0);
+    let _ = app.update(Message::MacroEditor(EditorMessage::Pointer(moved)));
+    let _ = app.update(Message::MacroEditor(EditorMessage::Release(Some(moved))));
+    assert_eq!(app.macros.get(&id).unwrap().steps[0].start_offset_ms, 1350);
+    assert!(app.macro_editor.pointer.is_none());
+}
+
+#[test]
+fn new_drag_discards_stale_pointer_position() {
+    let mut app = editor();
+    app.macro_editor.pointer = Some(Point::new(999.0, 30.0));
+    let _ = app.update(Message::MacroEditor(EditorMessage::PaletteDrag(
+        "/a.wav".into(),
+    )));
+    assert!(app.macro_editor.pointer.is_none());
+    app.macro_editor.pointer = Some(Point::new(999.0, 30.0));
+    let _ = app.update(Message::MacroEditor(EditorMessage::MoveStart(0, 20.0)));
+    assert!(app.macro_editor.pointer.is_none());
+}
+
+#[test]
 fn palette_drop_and_move_use_timeline_coordinates_and_cancel_outside() {
     let mut app = editor();
     let _ = app.update(Message::MacroEditor(EditorMessage::PaletteDrag(

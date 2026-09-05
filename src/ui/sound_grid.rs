@@ -65,11 +65,8 @@ pub fn view_groups<'a>(
             .fold(
                 column![].spacing(theme::space::LG),
                 |body, (tag, indices)| {
-                    body.push(
-                        text(tag.clone().unwrap_or_else(|| "Untagged".into()))
-                            .size(theme::font::BODY),
-                    )
-                    .push(view_grid_columns(sounds, indices, playing, grid, columns))
+                    body.push(text(group_heading(tag.as_deref())).size(theme::font::BODY))
+                        .push(view_grid_columns(sounds, indices, playing, grid, columns))
                 },
             )
             .width(Length::Fill)
@@ -78,6 +75,13 @@ pub fn view_groups<'a>(
     .width(Length::Fill)
     .height(Length::Shrink)
     .into()
+}
+
+fn group_heading(tag: Option<&str>) -> String {
+    match tag {
+        Some(tag) => format!("Tag: {tag}"),
+        None => "No tags".to_owned(),
+    }
 }
 
 #[allow(
@@ -332,6 +336,15 @@ pub fn context_menu_overlay<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn group_headings_distinguish_missing_tags_from_user_labels() {
+        assert_eq!(group_heading(None), "No tags");
+        for tag in ["Untagged", "No tags", "Tag: No tags", "Meme", ""] {
+            assert_eq!(group_heading(Some(tag)), format!("Tag: {tag}"));
+            assert_ne!(group_heading(Some(tag)), group_heading(None));
+        }
+    }
 
     fn test_sound() -> SoundEntry {
         SoundEntry {
