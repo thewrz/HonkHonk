@@ -49,6 +49,38 @@ pub fn view_grid<'a>(
     .into()
 }
 
+pub fn view_groups<'a>(
+    sounds: &'a [SoundEntry],
+    groups: Vec<(Option<String>, Vec<usize>)>,
+    playing: Option<&'a str>,
+    grid: GridCtx<'a>,
+) -> Element<'a, Message> {
+    responsive(move |size| {
+        let columns = tile_layout::responsive_columns(size.width, grid.columns, theme::space::LG);
+        if groups.is_empty() {
+            return view_grid_columns(sounds, &[], playing, grid, columns);
+        }
+        groups
+            .iter()
+            .fold(
+                column![].spacing(theme::space::LG),
+                |body, (tag, indices)| {
+                    body.push(
+                        text(tag.clone().unwrap_or_else(|| "Untagged".into()))
+                            .size(theme::font::BODY)
+                            .color(Theme::Dark.ink()),
+                    )
+                    .push(view_grid_columns(sounds, indices, playing, grid, columns))
+                },
+            )
+            .width(Length::Fill)
+            .into()
+    })
+    .width(Length::Fill)
+    .height(Length::Shrink)
+    .into()
+}
+
 #[allow(
     clippy::too_many_lines,
     reason = "grid builder preserves row chunking, tile gaps, and empty state in one layout path"
