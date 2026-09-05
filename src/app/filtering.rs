@@ -151,6 +151,7 @@ impl HonkHonk {
             self.macro_editor.text_entry_active = false;
             self.macro_editor.sort_open = false;
             self.macro_editor.dragging = None;
+            self.macro_editor.pointer = None;
             self.sort_menu_anchor = None;
             return iced::Task::none();
         }

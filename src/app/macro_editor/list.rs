@@ -163,6 +163,7 @@ impl HonkHonk {
         self.macro_editor.active = Some(id);
         self.macro_editor.menu = None;
         self.macro_editor.dragging = None;
+        self.macro_editor.pointer = None;
         self.macro_editor.text_entry_active = false;
     }
 
@@ -175,6 +176,7 @@ impl HonkHonk {
         self.macro_editor.active = self.macros.iter().next().map(|m| m.id.clone());
         self.macro_editor.menu = None;
         self.macro_editor.dragging = None;
+        self.macro_editor.pointer = None;
         self.macro_editor.text_entry_active = false;
     }
 }
