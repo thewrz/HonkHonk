@@ -14,7 +14,7 @@ pub struct PlaybackState {
     volume: f32,
     gain: f32,
     sample_rate: u32,
-    channels: u16,
+    source_channels: u16,
     layout: ChannelLayout,
     active: bool,
 }
@@ -28,7 +28,7 @@ impl PlaybackState {
             volume: 1.0,
             gain: 1.0,
             sample_rate: 48000,
-            channels: 2,
+            source_channels: 2,
             layout: ChannelLayout::new(2, SoundProcessing::default()),
             active: false,
         }
@@ -52,7 +52,7 @@ impl PlaybackState {
         sound_id: String,
         samples: Arc<Vec<f32>>,
         sample_rate: u32,
-        channels: u16,
+        source_channels: u16,
         gain: f32,
     ) {
         self.sound_id = Some(sound_id);
@@ -60,8 +60,8 @@ impl PlaybackState {
         self.cursor = 0;
         self.gain = gain.clamp(0.0, MAX_PER_SOUND_GAIN);
         self.sample_rate = sample_rate;
-        self.channels = channels;
-        self.layout = ChannelLayout::new(channels, SoundProcessing::default());
+        self.source_channels = source_channels;
+        self.layout = ChannelLayout::new(source_channels, SoundProcessing::default());
         self.active = true;
     }
 
@@ -93,7 +93,7 @@ impl PlaybackState {
     }
 
     pub fn set_channel_processing(&mut self, settings: SoundProcessing) {
-        self.layout = ChannelLayout::new(self.channels, settings);
+        self.layout = ChannelLayout::new(self.source_channels, settings);
     }
 
     pub fn set_volume(&mut self, v: f32) {
@@ -117,7 +117,7 @@ impl PlaybackState {
             self.layout
                 .fill(&samples[self.cursor..], buf, self.volume * self.gain);
         self.cursor += consumed;
-        if samples.len().saturating_sub(self.cursor) < self.channels.max(1) as usize {
+        if samples.len().saturating_sub(self.cursor) < self.source_channels.max(1) as usize {
             self.active = false;
         }
         written

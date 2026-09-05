@@ -54,3 +54,42 @@ fn force_mono_stereo_and_pan_have_defined_channel_behavior() {
     assert!((panned[1] - 0.4).abs() < 0.0001);
     assert_eq!(source, [0.6, 0.2, -0.2, 0.6]);
 }
+
+#[test]
+fn replaced_content_resets_only_audio_and_restores_known_content_preferences() {
+    let mut store = SoundMetaStore::default();
+    let legacy = SoundMeta {
+        volume: 1.5,
+        tags: vec!["Keep".into()],
+        display_name: Some("Path name".into()),
+        color: Some(3),
+        favorite: true,
+        assigned_graphic: Some(honkhonk::state::GraphicAssetRef::new("tile.png").unwrap()),
+        processing: SoundProcessing {
+            pan: 0.7,
+            ..Default::default()
+        },
+    };
+    store.set("path".into(), legacy.clone());
+    store.bind_fingerprint("path", "original");
+    assert_eq!(
+        store.get("path"),
+        legacy,
+        "first binding migrates legacy audio"
+    );
+    store.bind_fingerprint("path", "replacement");
+    let replaced = store.get("path");
+    assert_eq!(replaced.volume, SoundMeta::default().volume);
+    assert_eq!(replaced.processing, SoundProcessing::default());
+    assert_eq!(replaced.tags, legacy.tags);
+    assert_eq!(replaced.display_name, legacy.display_name);
+    assert_eq!(replaced.color, legacy.color);
+    assert_eq!(replaced.favorite, legacy.favorite);
+    assert_eq!(replaced.assigned_graphic, legacy.assigned_graphic);
+    store.bind_fingerprint("path", "original");
+    assert_eq!(
+        store.get("path"),
+        legacy,
+        "known content restores its audio"
+    );
+}

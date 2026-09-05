@@ -184,3 +184,24 @@ fn import_preview_respects_global_normalization() {
     )));
     assert_eq!(last_play(&app).1.normalization_gain, 1.0);
 }
+
+#[test]
+fn editor_identity_failure_reports_loading_failure_without_attempting_playback() {
+    let (mut app, sound, _) = fixture();
+    let _ = app.open_sound_editor(sound.id.clone());
+    let generation = app.processing_ui.generation;
+    let _ = app.editor_fingerprint_ready(sound.id, generation, Err("permission denied".into()));
+    assert!(!app.processing_ui.loading);
+    let notice = &app.notices.iter().last().unwrap().notice;
+    assert_eq!(notice.title, "Sound identity could not load");
+    assert!(notice.body.contains("permission denied"));
+    assert!(notice.body.contains("reopen the editor"));
+    assert!(
+        !app.audio
+            .as_ref()
+            .unwrap()
+            .sent_commands()
+            .iter()
+            .any(|cmd| matches!(cmd, AudioCommand::Play { .. }))
+    );
+}

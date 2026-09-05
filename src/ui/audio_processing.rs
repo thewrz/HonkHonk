@@ -13,7 +13,7 @@ pub fn global(settings: GlobalProcessing) -> Element<'static, Message> {
             .on_toggle(move |normalize| Message::GlobalProcessingChanged(GlobalProcessing { normalize, ..settings })),
         text("Normalization applies when a sound starts. Maximum boost: 12 dB."),
         dynamics(settings.dynamics).map(move |dynamics| Message::GlobalProcessingChanged(GlobalProcessing { dynamics, ..settings })),
-        text("Global dynamics act after all sound voices and effects are mixed. The limiter caps sample peaks at 98%; it does not limit your microphone or other apps."),
+        text("Global dynamics act after all sound voices and effects are mixed. Sample peaks are capped at 98% while the global compressor/limiter is enabled; it does not limit your microphone or other apps."),
     ].spacing(8).into()
 }
 

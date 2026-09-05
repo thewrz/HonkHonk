@@ -108,3 +108,22 @@ fn conversion_is_chunk_independent_on_sink_and_monitor() {
     );
     assert_eq!(&mono[..6], &[0.0, 0.0, 0.05, 0.1, 0.1, 0.2]);
 }
+
+#[test]
+fn forced_stereo_folds_multichannel_mean_but_preserve_keeps_every_channel() {
+    for channels in [3, 6] {
+        let source: Vec<f32> = (0..channels * 2).map(|n| n as f32 * 0.1).collect();
+        let mut stereo = state(source.clone(), channels, OutputMode::Stereo, 0.0);
+        assert_eq!(stereo.channels(), 2);
+        let mut frame = [0.0; 2];
+        assert_eq!(stereo.fill_buffer(&mut frame), 2);
+        let mean = source[..channels as usize].iter().sum::<f32>() / channels as f32;
+        assert!(frame.iter().all(|sample| (*sample - mean).abs() < 0.0001));
+        assert_eq!(stereo.progress(), 0.5);
+        let mut preserved = state(source.clone(), channels, OutputMode::Preserve, 0.0);
+        let mut output = vec![0.0; source.len()];
+        assert_eq!(preserved.channels(), channels);
+        assert_eq!(preserved.fill_buffer(&mut output), source.len());
+        assert_eq!(output, source);
+    }
+}

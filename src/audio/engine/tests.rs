@@ -174,7 +174,7 @@ fn channel_preparation_retains_original_pcm_and_source_format() {
         processing: crate::audio::processing::VoiceProcessing {
             sound: crate::audio::processing::SoundProcessing {
                 output: crate::audio::processing::OutputMode::Mono,
-                pan: 0.5,
+                pan: f32::NAN,
                 ..Default::default()
             },
             ..Default::default()
@@ -190,6 +190,7 @@ fn channel_preparation_retains_original_pcm_and_source_format() {
         mode: PlayMode::Concurrent,
     };
     let prepared = prepare_channels(request);
+    assert_eq!(prepared.processing.sound.pan, 0.0);
     assert!(
         Arc::ptr_eq(&samples, &prepared.samples),
         "play command must not copy PCM"

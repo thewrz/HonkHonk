@@ -37,6 +37,9 @@ impl SoundMetaStore {
         let mut meta = self.get(id);
         if let Some(audio) = self.audio.get(fingerprint) {
             audio.apply(&mut meta);
+        } else if self.fingerprints.contains_key(id) {
+            // New bytes at a previously bound path must not inherit the old audio.
+            AudioPreferences::from_meta(&SoundMeta::default()).apply(&mut meta);
         }
         self.fingerprints
             .insert(id.to_owned(), fingerprint.to_owned());

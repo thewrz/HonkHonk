@@ -97,7 +97,10 @@ impl HonkHonk {
                 self.editor_draft_volume = meta.volume;
                 self.persist_sound_metadata();
             }
-            Err(error) => self.playback_error(&id, &error),
+            Err(error) => {
+                self.notices.push(Notice::error("Sound identity could not load",
+                    format!("{id}: {error}. Check the file is readable and complete, then reopen the editor to retry loading its audio preferences.")), Instant::now());
+            }
         }
         Task::none()
     }

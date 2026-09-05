@@ -12,9 +12,14 @@ impl ChannelLayout {
     pub fn new(source: u16, settings: SoundProcessing) -> Self {
         let source = source.max(1);
         let settings = settings.sanitized();
-        let downmix = settings.output == OutputMode::Mono;
-        let mut output = if downmix { 1 } else { source };
-        if output == 1 && (settings.output == OutputMode::Stereo || settings.pan != 0.0) {
+        let downmix = settings.output == OutputMode::Mono
+            || (settings.output == OutputMode::Stereo && source > 2);
+        let mut output = match settings.output {
+            OutputMode::Mono => 1,
+            OutputMode::Stereo => 2,
+            OutputMode::Preserve => source,
+        };
+        if output == 1 && settings.pan != 0.0 {
             output = 2;
         }
         Self {

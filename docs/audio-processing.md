@@ -48,7 +48,11 @@ tags remain editable while loading.
 Save applies the draft; Cancel discards it. Audio settings are associated with
 a SHA-256 hash of the complete file bytes. An identical file inherits those
 settings on playback or when its editor opens, even after a move, rename, or
-application restart. Editing or re-encoding the file changes its identity.
+application restart. Editing or re-encoding the file changes its identity. New
+content replacing a previously identified file starts with default audio settings;
+recognized content
+restores its saved audio settings. The first identity check preserves legacy
+path-based audio settings.
 Names, tags, favorites, and artwork stay associated with their library paths.
 Settings for known content remain available after it leaves the library.
 For files edited in place, restart HonkHonk to discard cached audio before replaying.
@@ -66,9 +70,13 @@ Symphonia decodes supported integer and floating-point file formats into
 interleaved f32 PCM. That conversion does **not** resample the file. HonkHonk
 declares F32LE and the decoded native sample rate to PipeWire. PipeWire's stream
 adapter handles device sample-format/rate conversion and channel mapping, so
-no extra resampler or system dependency is added here. Channels above stereo
-retain the existing backend mapping behavior; the manual mono control can
-average them before playback.
+no extra resampler or system dependency is added here. Preserve keeps all source
+channels and the existing backend mapping. Force stereo always outputs two
+channels: mono is duplicated, stereo stays intact, and sources with more than
+two channels use the arithmetic mean of all channels duplicated left and right.
+Speaker positions are unavailable, so this fallback does not assume a surround
+layout and loses spatial separation. Force mono uses the same all-channel mean.
+Opposite-polarity channels may cancel when averaged.
 
 The current engine shares one active stream format across concurrent voices.
 Starting a sound whose rate or output channel count differs interrupts existing
