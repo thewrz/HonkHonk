@@ -122,15 +122,22 @@ fn decode_packets(
         // channels the container header lacked (#153).
         sample_rate.get_or_insert(spec.rate);
         channels.get_or_insert(spec.channels.count() as u16);
-        let capacity = decoded.capacity();
-        if capacity.saturating_mul(spec.channels.count())
-            > max_samples.saturating_sub(all_samples.len())
-        {
+        let frames = decoded.frames();
+        if frames == 0 {
+            continue;
+        }
+        let sample_count = frames
+            .checked_mul(spec.channels.count())
+            .ok_or(AudioError::SampleLimit)?;
+        if sample_count > max_samples.saturating_sub(all_samples.len()) {
             return Err(AudioError::SampleLimit);
         }
 
-        if sample_buf.as_ref().is_none_or(|b| capacity > b.capacity()) {
-            sample_buf = Some(SampleBuffer::<f32>::new(capacity as u64, spec));
+        if sample_buf
+            .as_ref()
+            .is_none_or(|b| sample_count > b.capacity())
+        {
+            sample_buf = Some(SampleBuffer::<f32>::new(frames as u64, spec));
         }
         let buf = sample_buf.as_mut().expect("buffer just initialized");
 
