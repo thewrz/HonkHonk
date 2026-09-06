@@ -40,7 +40,7 @@ fn linked_dynamics_limits_peaks_and_preserves_stereo_balance() {
     let mut samples = [2.0, 1.0].repeat(4800);
     dynamics.process(&mut samples, (48_000, 2), DynamicsSettings::default(), true);
     assert!(samples.iter().all(|s| s.is_finite() && s.abs() <= 0.98));
-    for frame in samples.chunks_exact(2) {
+    for frame in samples.as_chunks::<2>().0 {
         assert!((frame[0] / frame[1] - 2.0).abs() < 0.0001);
     }
     let mut invalid = [f32::NAN, f32::INFINITY];
